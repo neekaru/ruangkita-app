@@ -26,7 +26,8 @@ internal fun remotePhotoName(id: String, name: String): String = id + "-" + name
 }.joinToString("")
 
 internal data class UploadJob(val id: String, val path: String, val size: Long, val modified: Long,
-                              val name: String, val attempts: Int, val finalizing: Boolean, val destination: String)
+                              val name: String, val attempts: Int, val finalizing: Boolean,
+                              val destination: String, val state: String = "pending", val error: String = "")
 internal data class UploadRule(val enabled: Boolean = false, val mode: String = "all")
 
 /** Database handles are process-local; all state transitions are transactional and survive process death. */
@@ -38,32 +39,35 @@ internal class UploadStore(private val context: Context) : SQLiteOpenHelper(cont
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = error("Unsupported upload database version")
 
-    fun settings(): FtpSettings? {
+    fun settings(): TransferSettings? {
         val host = prefs.getString("host", null) ?: return null
-        val encrypted = prefs.getString("secret", null) ?: error("Password unavailable; save FTP settings again")
+        val encrypted = prefs.getString("secret", null) ?: error("Password unavailable; save transfer settings again")
         val password = try {
             val bytes = Base64.decode(encrypted, Base64.NO_WRAP)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
             String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
         } catch (_: Exception) { error("Saved password cannot be unlocked; enter and save it again") }
-        return FtpSettings(host, prefs.getInt("port", 21), prefs.getString("user", "")!!,
-            password, prefs.getString("folder", "/")!!, prefs.getBoolean("tls", true))
+        val protocol = prefs.getString("protocol", null)?.let { runCatching { TransferProtocol.valueOf(it) }.getOrNull() }
+            ?: if (prefs.getBoolean("tls", true)) TransferProtocol.FTPS else TransferProtocol.FTP
+        return TransferSettings(host, prefs.getInt("port", protocol.port), prefs.getString("user", "")!!,
+            password, prefs.getString("folder", "/")!!, protocol, prefs.getString("host_key", "")!!)
     }
 
-    @Synchronized fun saveSettings(value: FtpSettings) {
+    @Synchronized fun saveSettings(value: TransferSettings) {
         value.validate()
         val previousDestination = prefs.getString("destination", null)
         val changed = previousDestination != value.destination()
-        require(!changed || countUnfinished() == 0) { "Finish pending uploads before changing destination; credentials for this destination may still be corrected" }
+        require(!changed || countUnfinished() == 0) { "Finish or cancel pending uploads before changing the server" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
         val encrypted = Base64.encodeToString(cipher.iv + cipher.doFinal(value.password.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
-        // Disable discovery before committing a new destination, including across a crash here.
         if (changed) writableDatabase.execSQL("UPDATE sessions SET enabled=0")
         check(prefs.edit().putString("host", value.host).putInt("port", value.port)
-            .putString("user", value.user).putString("folder", value.folder).putBoolean("tls", value.tls)
-            .putString("secret", encrypted).putString("destination", value.destination()).commit()) { "Cannot save FTP settings" }
+            .putString("user", value.user).putString("folder", value.folder)
+            .putBoolean("tls", value.protocol == TransferProtocol.FTPS).putString("protocol", value.protocol.name)
+            .putString("host_key", value.hostKeyFingerprint)
+            .putString("secret", encrypted).putString("destination", value.destination()).commit()) { "Cannot save transfer settings" }
     }
 
     private fun secretKey(): SecretKey {
@@ -132,10 +136,18 @@ internal class UploadStore(private val context: Context) : SQLiteOpenHelper(cont
     }
 
     fun next(): UploadJob? = readableDatabase.rawQuery(
-        "SELECT id,path,size,modified,name,attempts,finalizing,destination FROM jobs WHERE destination=? AND state='pending' AND due<=? ORDER BY rowid LIMIT 1",
+        "SELECT id,path,size,modified,name,attempts,finalizing,destination,state,error FROM jobs WHERE destination=? AND state='pending' AND due<=? ORDER BY rowid LIMIT 1",
         arrayOf(prefs.getString("destination", "")!!, System.currentTimeMillis().toString())).use {
-        if (!it.moveToFirst()) null else UploadJob(it.getString(0), it.getString(1), it.getLong(2), it.getLong(3), it.getString(4), it.getInt(5), it.getInt(6) != 0, it.getString(7))
+        if (!it.moveToFirst()) null else uploadJob(it)
     }
+
+    fun jobs(limit: Int = 50): List<UploadJob> = readableDatabase.rawQuery(
+        "SELECT id,path,size,modified,name,attempts,finalizing,destination,state,error FROM jobs ORDER BY rowid DESC LIMIT ?",
+        arrayOf(limit.toString())).use { cursor -> buildList { while (cursor.moveToNext()) add(uploadJob(cursor)) } }
+
+    private fun uploadJob(cursor: android.database.Cursor) = UploadJob(
+        cursor.getString(0), cursor.getString(1), cursor.getLong(2), cursor.getLong(3), cursor.getString(4),
+        cursor.getInt(5), cursor.getInt(6) != 0, cursor.getString(7), cursor.getString(8), cursor.getString(9))
     fun finalizing(job: UploadJob) { writableDatabase.execSQL("UPDATE jobs SET finalizing=1 WHERE id=? AND state='pending'", arrayOf(job.id)) }
     fun done(job: UploadJob) { writableDatabase.execSQL("UPDATE jobs SET state='done',error='' WHERE id=? AND state='pending'", arrayOf(job.id)) }
     fun fail(job: UploadJob, message: String, permanent: Boolean) {

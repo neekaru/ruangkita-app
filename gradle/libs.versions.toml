@@ -7,6 +7,8 @@ espressoCore = "3.7.0"
 appcompat = "1.8.0"
 material = "1.14.0"
 constraintlayout = "2.2.2"
+sshj = "0.41.2"
+sshd = "2.20.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -16,7 +18,10 @@ androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-co
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
+sshj = { group = "com.hierynomus", name = "sshj", version.ref = "sshj" }
+apache-sshd-core = { group = "org.apache.sshd", name = "sshd-core", version.ref = "sshd" }
+apache-sshd-sftp = { group = "org.apache.sshd", name = "sshd-sftp", version.ref = "sshd" }
 
+apache-sshd-scp = { group = "org.apache.sshd", name = "sshd-scp", version.ref = "sshd" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-

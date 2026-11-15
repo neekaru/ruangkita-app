@@ -22,7 +22,7 @@ class UploadStoreTest {
         }
         val directory = File(base.cacheDir, prefix).apply { mkdirs() }
         var store = UploadStore(context)
-        val settings = FtpSettings("first.example", 21, "user", "secret", "/photos", true)
+        val settings = TransferSettings("first.example", 21, "user", "secret", "/photos", TransferProtocol.FTPS)
         try {
             store.saveSettings(settings)
             File(directory, "old.JPG").writeBytes(byteArrayOf(1))

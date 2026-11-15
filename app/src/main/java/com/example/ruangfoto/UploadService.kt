@@ -21,7 +21,7 @@ import javax.net.ssl.SSLException
 class UploadService : Service() {
     private val worker = Executors.newSingleThreadScheduledExecutor()
     private lateinit var store: UploadStore
-    @Volatile private var transfer: FtpTransfer? = null
+    @Volatile private var transfer: TransferClient? = null
     @Volatile private var stopped = false
     private var idleSince = 0L
     private var lastNotification = 0L
@@ -65,9 +65,9 @@ class UploadService : Service() {
                 return
             }
             idleSince = 0L
-            val settings = store.settings() ?: throw FtpFailure("Configure an FTP server before uploading", true)
+            val settings = store.settings() ?: throw TransferFailure("Configure a transfer server before uploading", true)
             if (settings.destination() != job.destination) return
-            val current = FtpTransfer()
+            val current = transferClient(settings)
             transfer = current
             active = current
             try {
@@ -79,15 +79,16 @@ class UploadService : Service() {
                 if (!stopped && !store.paused) store.done(job)
             } catch (error: Exception) {
                 if (!stopped && !store.paused) {
-                    val permanent = error is SSLException || error is IllegalArgumentException || (error as? FtpFailure)?.permanent == true
+                    val permanent = error is SSLException || error is IllegalArgumentException || (error as? TransferFailure)?.permanent == true
                     val message = when (error) {
-                        is SSLException -> "FTPS certificate/TLS verification failed; check server certificate and hostname"
-                        is FtpFailure -> error.message ?: "FTP transfer failed"
+                        is SSLException -> "FTPS certificate verification failed; check the server certificate"
+                        is TransferFailure -> error.message ?: "Transfer failed"
                         is InterruptedIOException -> "Network timeout; upload will retry"
                         else -> "Network connection failed; check server and connection"
                     }
                     store.fail(job, message, permanent)
-                    if (error is SSLException || error is IllegalArgumentException || (error as? FtpFailure)?.configuration == true) store.paused = true
+                    if (error is SSLException || error is IllegalArgumentException || (error as? TransferFailure)?.configuration == true) store.paused = true
+                    if (error is TransferFailure && error.configuration) progress = error.message ?: "Check transfer settings"
                 }
             } finally { transfer = null; if (active === current) active = null; progress = "" }
         } catch (_: Exception) {
@@ -133,7 +134,7 @@ class UploadService : Service() {
         @Volatile var running = false; private set
         @Volatile var watching = false
         @Volatile var progress = ""; private set
-        @Volatile private var active: FtpTransfer? = null
+        @Volatile private var active: TransferClient? = null
         fun startFromVisibleApp(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, UploadService::class.java))
         }

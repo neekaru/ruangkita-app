@@ -277,22 +277,13 @@
                 android:textStyle="bold"
                 android:enabled="false" />
 
-            <Button
-                android:id="@+id/uploadButton"
-                android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:text="FTP AUTO-UPLOAD"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/uploadStatus"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/transfersButton"
+                style="@style/Widget.RuangFoto.Transfer.TextButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Auto-upload off · configure a server"
-                android:textColor="#D5DED3"
-                android:textSize="12sp"
-                android:maxLines="3" />
-
+                android:text="@string/transfers_title"
+                android:textSize="12sp" />
         </LinearLayout>
 
         <!-- PREVIEW HEADER -->

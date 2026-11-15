@@ -12,11 +12,14 @@ import java.util.concurrent.Executors
 
 class FtpTransferTest {
     @Test fun rejectsCommandInjectionAndUnsafeRemotePaths() {
-        val base = FtpSettings("localhost", 21, "user", "secret", "/photos", false)
+        val base = TransferSettings("localhost", 21, "user", "secret", "/photos", TransferProtocol.FTP)
         for (bad in listOf(base.copy(user = "user\r\nDELE x"), base.copy(password = "a\nb"),
             base.copy(folder = "/../photos"), base.copy(host = "ftp://localhost"), base.copy(port = 0))) {
             try { bad.validate(); fail("Unsafe settings accepted") } catch (_: IllegalArgumentException) { }
         }
+        val ssh = base.copy(protocol = TransferProtocol.SFTP)
+        try { ssh.validate(); fail("Unpinned SSH server accepted") } catch (_: IllegalArgumentException) { }
+        assertNotEquals(base.destination(), ssh.copy(hostKeyFingerprint = "SHA256:" + "a".repeat(43)).destination())
         assertTrue(uploadMatches("photo.CR3", "raw"))
         assertFalse(uploadMatches("photo.ARW.part", "all"))
         assertFalse(uploadMatches("photo.JPG", "raw"))
@@ -26,7 +29,7 @@ class FtpTransferTest {
         LocalFtp().use { server ->
             val bytes = ByteArray(180_003) { (it * 73).toByte() }
             val file = File.createTempFile("ruangfoto", ".ARW").apply { writeBytes(bytes) }
-            val settings = FtpSettings("127.0.0.1", server.port, "user", "password", "/photos", false)
+            val settings = TransferSettings("127.0.0.1", server.port, "user", "password", "/photos", TransferProtocol.FTP)
             val name = remotePhotoName("c0ffee", file.name)
             try {
                 FtpTransfer().test(settings)
@@ -43,7 +46,7 @@ class FtpTransferTest {
                 try {
                     FtpTransfer().upload(settings, file, file.length(), file.lastModified(), name, false, {}, {})
                     fail("Existing photo was overwritten")
-                } catch (error: FtpFailure) { assertTrue(error.permanent) }
+                } catch (error: TransferFailure) { assertTrue(error.permanent) }
                 assertArrayEquals(bytes, server.files[name])
             } finally { file.delete() }
         }
@@ -53,9 +56,9 @@ class FtpTransferTest {
         val file = File.createTempFile("ruangfoto", ".JPG").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         try {
             try {
-                FtpTransfer().upload(FtpSettings("127.0.0.1", 1, "x", "x", "/", false), file, 4, file.lastModified(), "owned.jpg", false, {}, {})
+                FtpTransfer().upload(TransferSettings("127.0.0.1", 1, "x", "x", "/", TransferProtocol.FTP), file, 4, file.lastModified(), "owned.jpg", false, {}, {})
                 fail("Changed source was accepted")
-            } catch (error: FtpFailure) { assertTrue(error.permanent) }
+            } catch (error: TransferFailure) { assertTrue(error.permanent) }
         } finally { file.delete() }
     }
 

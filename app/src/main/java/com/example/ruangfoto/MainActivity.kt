@@ -36,7 +36,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var usbManager: UsbManager
-    private lateinit var uploadUi: UploadUi
 
     private var usbConnection: UsbDeviceConnection? = null
     private var receiverRegistered = false
@@ -218,8 +217,6 @@ class MainActivity : AppCompatActivity() {
         setupPlugins()
         registerUsbReceiver()
         setupButtons()
-        uploadUi = UploadUi(this, binding.uploadButton, binding.uploadStatus,
-            { activeSessionDir }, { nativeRunning.get() })
         setupSessionScreen()
         updateDashboard()
     }
@@ -485,6 +482,9 @@ class MainActivity : AppCompatActivity() {
 
         binding.stopButton.setOnClickListener {
             requestSessionStop()
+        }
+        binding.transfersButton.setOnClickListener {
+            startActivity(UploadActivity.intent(this, activeSessionDir))
         }
 
         binding.stopButton.isEnabled = false
@@ -1036,6 +1036,11 @@ class MainActivity : AppCompatActivity() {
         )
 
         UploadService.watching = true
+        activeSessionDir?.let { directory ->
+            if (UploadStore.get(this).rule(directory).enabled && !UploadStore.get(this).paused) {
+                runCatching { UploadService.startFromVisibleApp(this) }
+            }
+        }
 
         nativeExecutor.execute {
 
@@ -1392,20 +1397,10 @@ class MainActivity : AppCompatActivity() {
     // DESTROY
     // =====================================
 
-    override fun onResume() {
-        super.onResume()
-        if (::uploadUi.isInitialized) uploadUi.resume()
-    }
-
-    override fun onPause() {
-        if (::uploadUi.isInitialized) uploadUi.stop()
-        super.onPause()
-    }
 
     override fun onDestroy() {
 
         activityDestroyed = true
-        uploadUi.close()
 
         if (nativeRunning.get()) {
 
