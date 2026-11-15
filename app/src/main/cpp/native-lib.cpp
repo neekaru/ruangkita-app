@@ -15,6 +15,7 @@
 #include <gphoto2/gphoto2-port-info-list.h>
 #include <gphoto2/gphoto2-port-result.h>
 #include <gphoto2/gphoto2-file.h>
+#include "camera-paths.h"
 
 // =====================================
 // CONFIGURATION
@@ -53,8 +54,7 @@ static bool downloadCameraFile(
         return false;
     }
 
-    const std::string destination =
-            outputDir + "/" + safeName;
+    const std::string destination = unusedPhotoPath(outputDir, safeName);
 
     const std::string temporary =
             destination + ".part";
@@ -386,7 +386,6 @@ Java_com_ruangfoto_app_MainActivity_testUsbFd(
         jint vendorId,
         jint productId
 ) {
-    g_stopRequested.store(false);
 
     std::string result;
 
