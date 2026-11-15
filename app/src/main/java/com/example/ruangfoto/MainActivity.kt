@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var usbManager: UsbManager
+    private lateinit var uploadUi: UploadUi
 
     private var usbConnection: UsbDeviceConnection? = null
     private var receiverRegistered = false
@@ -217,6 +218,8 @@ class MainActivity : AppCompatActivity() {
         setupPlugins()
         registerUsbReceiver()
         setupButtons()
+        uploadUi = UploadUi(this, binding.uploadButton, binding.uploadStatus,
+            { activeSessionDir }, { nativeRunning.get() })
         setupSessionScreen()
         updateDashboard()
     }
@@ -1006,6 +1009,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         stopRequested.set(false)
+        resetStop()
 
         binding.stopButton.isEnabled = false
         binding.statusText.text = "Starting camera receiver..."
@@ -1030,6 +1034,8 @@ class MainActivity : AppCompatActivity() {
             1,
             TimeUnit.SECONDS
         )
+
+        UploadService.watching = true
 
         nativeExecutor.execute {
 
@@ -1084,6 +1090,7 @@ class MainActivity : AppCompatActivity() {
                 publishTask = null
 
                 nativeRunning.set(false)
+                UploadService.watching = false
                 stopRequested.set(false)
 
                 activeUsbDeviceName = null
@@ -1379,14 +1386,26 @@ class MainActivity : AppCompatActivity() {
     ): String
 
     external fun requestStop()
+    external fun resetStop()
 
     // =====================================
     // DESTROY
     // =====================================
 
+    override fun onResume() {
+        super.onResume()
+        if (::uploadUi.isInitialized) uploadUi.resume()
+    }
+
+    override fun onPause() {
+        if (::uploadUi.isInitialized) uploadUi.stop()
+        super.onPause()
+    }
+
     override fun onDestroy() {
 
         activityDestroyed = true
+        uploadUi.close()
 
         if (nativeRunning.get()) {
 
