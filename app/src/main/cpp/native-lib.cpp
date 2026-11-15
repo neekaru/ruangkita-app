@@ -7,6 +7,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 #include <gphoto2/gphoto2-camera.h>
 #include <gphoto2/gphoto2-abilities-list.h>
@@ -15,6 +17,8 @@
 #include <gphoto2/gphoto2-port-info-list.h>
 #include <gphoto2/gphoto2-port-result.h>
 #include <gphoto2/gphoto2-file.h>
+#include <gphoto2/gphoto2-result.h>
+#include "camera-paths.h"
 
 // =====================================
 // CONFIGURATION
@@ -23,6 +27,7 @@
 static const int EVENT_TIMEOUT_MS = 1000;
 
 static std::atomic<bool> g_stopRequested(false);
+#include "camera-requests.h"
 
 // =====================================
 // DOWNLOAD CAMERA FILE
@@ -34,7 +39,8 @@ static bool downloadCameraFile(
         const char* folder,
         const char* filename,
         const std::string& outputDir,
-        std::string& output
+        std::string& output,
+        std::string* savedPath = nullptr
 ) {
     if (folder == nullptr || filename == nullptr) {
         output += "[DOWNLOAD ERROR] Invalid camera file path.\n";
@@ -53,8 +59,7 @@ static bool downloadCameraFile(
         return false;
     }
 
-    const std::string destination =
-            outputDir + "/" + safeName;
+    const std::string destination = unusedPhotoPath(outputDir, safeName);
 
     const std::string temporary =
             destination + ".part";
@@ -117,6 +122,12 @@ static bool downloadCameraFile(
         return false;
     }
 
+    if (cameraOperationCancelled()) {
+        output += "Download cancelled before finalizing.\n";
+        unlink(temporary.c_str());
+        return false;
+    }
+
     if (rename(
             temporary.c_str(),
             destination.c_str()
@@ -135,8 +146,11 @@ static bool downloadCameraFile(
     output += std::to_string(fileInfo.st_size);
     output += " bytes\n";
 
+    if (savedPath) *savedPath = destination;
     return true;
 }
+
+#include "camera-browser.h"
 
 // =====================================
 // CAMERA EVENT LISTENER
@@ -159,19 +173,32 @@ static void listenCameraEvents(
     int failedDownloads = 0;
 
     bool listenerError = false;
+    bool eventsSupported = true;
 
     while (!g_stopRequested.load()) {
+        processBrowserRequest(camera, context, outputDir);
+        if (!eventsSupported) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
 
         CameraEventType eventType = GP_EVENT_UNKNOWN;
         void* eventData = nullptr;
 
         int ret = gp_camera_wait_for_event(
                 camera,
-                EVENT_TIMEOUT_MS,
+                browser.browsing.load() ? 100 : EVENT_TIMEOUT_MS,
                 &eventType,
                 &eventData,
                 context
         );
+
+        if (ret == GP_ERROR_NOT_SUPPORTED) {
+            eventsSupported = false;
+            output += "Automatic events unsupported; camera browsing remains available.\n";
+            if (eventData) free(eventData);
+            continue;
+        }
 
         if (g_stopRequested.load()) {
             if (eventData != nullptr) {
@@ -386,7 +413,6 @@ Java_com_ruangfoto_app_MainActivity_testUsbFd(
         jint vendorId,
         jint productId
 ) {
-    g_stopRequested.store(false);
 
     std::string result;
 
@@ -693,6 +719,7 @@ Java_com_ruangfoto_app_MainActivity_testUsbFd(
     }
 
     cameraInitialized = true;
+    startBrowserSession(context);
 
     result += "PTP initialization: SUCCESS\n";
 
@@ -712,6 +739,7 @@ Java_com_ruangfoto_app_MainActivity_testUsbFd(
     // =====================================
 
     cleanup:
+    endBrowserSession();
 
     result += "\n[CLEANUP]\n";
 

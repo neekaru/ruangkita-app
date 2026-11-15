@@ -263,6 +263,13 @@
 
             </LinearLayout>
 
+            <Button
+                android:id="@+id/browseButton"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:text="BROWSE CAMERA PHOTOS"
+                android:textSize="12sp" />
+
             <!-- STOP RECEIVING -->
 
             <Button
