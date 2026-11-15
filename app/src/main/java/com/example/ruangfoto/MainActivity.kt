@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var usbManager: UsbManager
+    private lateinit var cameraBrowser: CameraBrowser
 
     private var usbConnection: UsbDeviceConnection? = null
     private var receiverRegistered = false
@@ -217,6 +218,11 @@ class MainActivity : AppCompatActivity() {
         setupPlugins()
         registerUsbReceiver()
         setupButtons()
+        cameraBrowser = CameraBrowser(this, { activeSessionDir }) {
+            updateSessionStats()
+            loadLatestJpegPreview()
+        }
+        binding.browseButton.setOnClickListener { cameraBrowser.show() }
         setupSessionScreen()
         updateDashboard()
     }
@@ -1006,6 +1012,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         stopRequested.set(false)
+        resetStop()
 
         binding.stopButton.isEnabled = false
         binding.statusText.text = "Starting camera receiver..."
@@ -1379,6 +1386,7 @@ class MainActivity : AppCompatActivity() {
     ): String
 
     external fun requestStop()
+    external fun resetStop()
 
     // =====================================
     // DESTROY
@@ -1387,6 +1395,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
 
         activityDestroyed = true
+        cameraBrowser.close()
 
         if (nativeRunning.get()) {
 
