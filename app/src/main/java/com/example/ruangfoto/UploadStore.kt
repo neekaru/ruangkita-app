@@ -51,8 +51,15 @@ internal class UploadStore(private val context: Context) : SQLiteOpenHelper(cont
         val protocol = prefs.getString("protocol", null)?.let { runCatching { TransferProtocol.valueOf(it) }.getOrNull() }
             ?: if (prefs.getBoolean("tls", true)) TransferProtocol.FTPS else TransferProtocol.FTP
         return TransferSettings(host, prefs.getInt("port", protocol.port), prefs.getString("user", "")!!,
-            password, prefs.getString("folder", "/")!!, protocol, prefs.getString("host_key", "")!!)
+            password, prefs.getString("folder", "/")!!, protocol, prefs.getString("host_key", "")!!, timing())
     }
+
+    private fun timing() = TransferTiming(
+        prefs.getInt("connect_timeout_seconds", 15),
+        prefs.getInt("read_timeout_seconds", 30),
+        prefs.getInt("retry_delay_seconds", 5),
+        prefs.getInt("max_retry_delay_seconds", 300),
+        prefs.getInt("max_attempts", 8))
 
     @Synchronized fun saveSettings(value: TransferSettings) {
         value.validate()
@@ -67,6 +74,11 @@ internal class UploadStore(private val context: Context) : SQLiteOpenHelper(cont
             .putString("user", value.user).putString("folder", value.folder)
             .putBoolean("tls", value.protocol == TransferProtocol.FTPS).putString("protocol", value.protocol.name)
             .putString("host_key", value.hostKeyFingerprint)
+            .putInt("connect_timeout_seconds", value.timing.connectTimeoutSeconds)
+            .putInt("read_timeout_seconds", value.timing.readTimeoutSeconds)
+            .putInt("retry_delay_seconds", value.timing.retryDelaySeconds)
+            .putInt("max_retry_delay_seconds", value.timing.maxRetryDelaySeconds)
+            .putInt("max_attempts", value.timing.maxAttempts)
             .putString("secret", encrypted).putString("destination", value.destination()).commit()) { "Cannot save transfer settings" }
     }
 
@@ -152,9 +164,10 @@ internal class UploadStore(private val context: Context) : SQLiteOpenHelper(cont
     fun done(job: UploadJob) { writableDatabase.execSQL("UPDATE jobs SET state='done',error='' WHERE id=? AND state='pending'", arrayOf(job.id)) }
     fun fail(job: UploadJob, message: String, permanent: Boolean) {
         val attempts = job.attempts + 1
-        val delay = minOf(300_000L, 5_000L * (1L shl minOf(attempts - 1, 6)))
+        val policy = timing()
+        val delay = policy.retryDelayMillis(attempts)
         writableDatabase.execSQL("UPDATE jobs SET state=?,attempts=?,due=?,error=? WHERE id=? AND state='pending'",
-            arrayOf(if (permanent || attempts >= 8) "failed" else "pending", attempts, System.currentTimeMillis() + delay, message, job.id))
+            arrayOf<Any>(if (permanent || attempts >= policy.maxAttempts) "failed" else "pending", attempts, System.currentTimeMillis() + delay, message, job.id))
     }
     fun retryFailed() { writableDatabase.execSQL("UPDATE jobs SET state='pending',attempts=0,due=0,error='' WHERE state='failed'") }
     @Synchronized fun cancelUnfinished() {

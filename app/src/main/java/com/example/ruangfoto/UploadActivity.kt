@@ -1,7 +1,6 @@
 package com.ruangfoto.app
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.widget.ArrayAdapter
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -28,6 +28,7 @@ class UploadActivity : AppCompatActivity() {
     private lateinit var rows: ArrayAdapter<String>
     private var displayed = emptyList<String>()
     private var loadingRule = false
+    private var messageExpiresAt = 0L
     private val modes = listOf("all", "jpeg", "raw")
 
     private val refresh = object : Runnable {
@@ -42,7 +43,7 @@ class UploadActivity : AppCompatActivity() {
                 handler.post {
                     if (visible && !closed) result.onSuccess { (summary, jobs) ->
                         binding.queueSummary.text = summary
-                        binding.transferProgress.text = UploadService.progress
+                        if (SystemClock.elapsedRealtime() >= messageExpiresAt) binding.transferProgress.text = UploadService.progress
                         binding.transferToggleButton.setText(if (store.paused) R.string.transfer_resume else R.string.transfer_pause)
                         if (jobs != displayed) { displayed = jobs; rows.clear(); rows.addAll(jobs) }
                     }.onFailure { binding.transferProgress.text = "Transfer queue unavailable" }
@@ -80,21 +81,28 @@ class UploadActivity : AppCompatActivity() {
             if (store.paused) { store.paused = false; startUploads() }
             else UploadService.pause(this)
         }
+        binding.stopUploadsButton.setOnClickListener { stopUploads() }
         binding.toolbar.menu.add(0, 1, 0, R.string.transfer_retry)
         binding.toolbar.menu.add(0, 2, 1, R.string.transfer_send_existing)
-        binding.toolbar.menu.add(0, 3, 2, R.string.transfer_cancel)
         binding.toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> { store.retryFailed(); store.paused = false; startUploads() }
                 2 -> saveSession(true)
-                3 -> AlertDialog.Builder(this).setTitle(R.string.transfer_cancel)
-                    .setMessage("Local photos are kept. Completed uploads stay on the server.")
-                    .setNegativeButton("Keep queue", null).setPositiveButton("Cancel uploads") { _, _ ->
-                        UploadService.pause(this); store.cancelUnfinished(); loadSession()
-                    }.show()
             }
             true
         }
+    }
+
+    private fun stopUploads() {
+        UploadService.pause(this)
+        store.cancelUnfinished()
+        loadSession()
+        showMessage("Uploads stopped. Local photos are kept.")
+    }
+
+    private fun showMessage(message: String) {
+        messageExpiresAt = SystemClock.elapsedRealtime() + 10_000
+        binding.transferProgress.text = message
     }
 
     private fun loadSession() {
@@ -119,7 +127,7 @@ class UploadActivity : AppCompatActivity() {
             if (enabled && !store.paused) startUploads()
         } catch (error: Exception) {
             loadSession()
-            binding.transferProgress.text = error.message ?: "Could not save session settings"
+            showMessage(error.message ?: "Could not save session settings")
         }
     }
 
@@ -127,7 +135,7 @@ class UploadActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 210)
         try { UploadService.startFromVisibleApp(this) }
-        catch (_: Exception) { store.paused = true; binding.transferProgress.text = "Reopen Transfers to resume uploads" }
+        catch (_: Exception) { store.paused = true; showMessage("Reopen Transfers to resume uploads") }
     }
 
     override fun onResume() {

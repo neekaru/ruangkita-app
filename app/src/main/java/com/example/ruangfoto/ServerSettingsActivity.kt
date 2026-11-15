@@ -48,6 +48,11 @@ class ServerSettingsActivity : AppCompatActivity() {
         binding.testConnectionButton.setOnClickListener { testConnection() }
         binding.trustHostButton.setOnClickListener { readSshFingerprint() }
         binding.browseFolderButton.setOnClickListener { browseRemoteFolders() }
+        binding.timingSettingsButton.setOnClickListener {
+            val expanded = binding.timingOptions.visibility != View.VISIBLE
+            binding.timingOptions.visibility = if (expanded) View.VISIBLE else View.GONE
+            binding.timingSettingsButton.setText(if (expanded) R.string.transfer_hide_timing else R.string.transfer_timing)
+        }
     }
 
     private fun loadSavedSettings() {
@@ -67,6 +72,12 @@ class ServerSettingsActivity : AppCompatActivity() {
             binding.portInput.setText(TransferProtocol.FTPS.port.toString())
             binding.folderInput.setText("/")
         }
+        val timing = value?.timing ?: TransferTiming()
+        binding.connectTimeoutInput.setText(timing.connectTimeoutSeconds.toString())
+        binding.readTimeoutInput.setText(timing.readTimeoutSeconds.toString())
+        binding.retryDelayInput.setText(timing.retryDelaySeconds.toString())
+        binding.maxRetryDelayInput.setText(timing.maxRetryDelaySeconds.toString())
+        binding.maxAttemptsInput.setText(timing.maxAttempts.toString())
         saved.exceptionOrNull()?.let { updateMessage("Saved password unavailable; enter it again") }
         updateProtocolFields(value?.protocol ?: TransferProtocol.FTPS)
     }
@@ -92,7 +103,13 @@ class ServerSettingsActivity : AppCompatActivity() {
             binding.passwordInput.text.toString(),
             binding.folderInput.text.toString().trim(),
             protocol,
-            binding.hostFingerprintInput.text.toString().trim()
+            binding.hostFingerprintInput.text.toString().trim(),
+            TransferTiming(
+                binding.connectTimeoutInput.text.toString().toIntOrNull() ?: 0,
+                binding.readTimeoutInput.text.toString().toIntOrNull() ?: 0,
+                binding.retryDelayInput.text.toString().toIntOrNull() ?: 0,
+                binding.maxRetryDelayInput.text.toString().toIntOrNull() ?: 0,
+                binding.maxAttemptsInput.text.toString().toIntOrNull() ?: 0)
         ).also { it.validate(allowUnpinnedHost) }
     }
 

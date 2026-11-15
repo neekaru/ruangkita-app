@@ -5,6 +5,7 @@
     <color name="transfer_accent">#D5A85B</color>
     <color name="transfer_text">#F2F4EC</color>
     <color name="transfer_muted">#9BA69B</color>
+    <color name="transfer_stop">#DE998D</color>
 
     <style name="Theme.RuangFoto.Transfers" parent="Theme.SonyGphotoTest">
         <item name="colorPrimary">@color/transfer_accent</item>
@@ -67,4 +68,13 @@
     <string name="transfer_verify_host">Verify SSH host</string>
     <string name="transfer_test">Test connection</string>
     <string name="transfer_save">Save server</string>
+    <string name="transfer_timing">Timeouts and retry</string>
+    <string name="transfer_hide_timing">Hide timeout and retry settings</string>
+    <string name="transfer_connect_timeout">Connection timeout (seconds)</string>
+    <string name="transfer_read_timeout">Transfer / read timeout (seconds)</string>
+    <string name="transfer_retry_delay">Initial retry delay (seconds)</string>
+    <string name="transfer_max_retry_delay">Maximum retry delay (seconds)</string>
+    <string name="transfer_max_attempts">Maximum attempts</string>
+    <string name="transfer_timing_hint">Timeout changes apply to the next connection. Retry delay doubles up to your maximum.</string>
+    <string name="transfer_stop">Stop uploads</string>
 </resources>

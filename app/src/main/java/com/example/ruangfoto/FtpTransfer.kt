@@ -18,11 +18,33 @@ internal enum class TransferProtocol(val title: String, val port: Int) {
     SCP("SCP over SSH", 22)
 }
 
+internal data class TransferTiming(
+    val connectTimeoutSeconds: Int = 15,
+    val readTimeoutSeconds: Int = 30,
+    val retryDelaySeconds: Int = 5,
+    val maxRetryDelaySeconds: Int = 300,
+    val maxAttempts: Int = 8
+) {
+    fun validate() {
+        require(connectTimeoutSeconds in 1..300) { "Connection timeout must be 1–300 seconds" }
+        require(readTimeoutSeconds in 1..3600) { "Transfer timeout must be 1–3600 seconds" }
+        require(retryDelaySeconds in 1..3600) { "Retry delay must be 1–3600 seconds" }
+        require(maxRetryDelaySeconds in retryDelaySeconds..86400) { "Maximum retry delay must be at least the initial delay and at most 86400 seconds" }
+        require(maxAttempts in 1..50) { "Maximum attempts must be 1–50" }
+    }
+
+    fun retryDelayMillis(attempt: Int): Long = minOf(
+        maxRetryDelaySeconds * 1000L,
+        retryDelaySeconds * 1000L * (1L shl (attempt - 1).coerceIn(0, 30)))
+}
+
 internal data class TransferSettings(
     val host: String, val port: Int, val user: String, val password: String,
-    val folder: String, val protocol: TransferProtocol, val hostKeyFingerprint: String = ""
+    val folder: String, val protocol: TransferProtocol, val hostKeyFingerprint: String = "",
+    val timing: TransferTiming = TransferTiming()
 ) {
     fun validate(allowUnpinnedHost: Boolean = false) {
+        timing.validate()
         require(host.isNotBlank() && host.none { it.isWhitespace() || it in "/\\\r\n\u0000" }) { "Enter a hostname or IP, without a URL or path" }
         require(port in 1..65535) { "Port must be 1–65535" }
         require(user.isNotBlank()) { "Username is required" }
@@ -78,9 +100,9 @@ internal class FtpTransfer : TransferClient {
             }
         } else FTPClient()
         client = ftp
-        ftp.connectTimeout = 15_000
-        ftp.defaultTimeout = 20_000
-        ftp.setDataTimeout(Duration.ofSeconds(20))
+        ftp.connectTimeout = settings.timing.connectTimeoutSeconds * 1000
+        ftp.defaultTimeout = settings.timing.readTimeoutSeconds * 1000
+        ftp.setDataTimeout(Duration.ofSeconds(settings.timing.readTimeoutSeconds.toLong()))
         ftp.controlEncoding = "UTF-8"
         checkCancelled()
         ftp.connect(settings.host, settings.port)

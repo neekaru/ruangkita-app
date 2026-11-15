@@ -11,6 +11,21 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 class FtpTransferTest {
+    @Test fun configurableRetryIsCappedWithoutRedirectingQueuedPhotos() {
+        val policy = TransferTiming(9, 45, 7, 20, 3)
+        policy.validate()
+        assertEquals(7_000L, policy.retryDelayMillis(1))
+        assertEquals(14_000L, policy.retryDelayMillis(2))
+        assertEquals(20_000L, policy.retryDelayMillis(3))
+        assertEquals(20_000L, policy.retryDelayMillis(50))
+        val settings = TransferSettings("localhost", 21, "user", "secret", "/", TransferProtocol.FTP)
+        assertEquals(settings.destination(), settings.copy(timing = policy).destination())
+        for (bad in listOf(policy.copy(connectTimeoutSeconds = 0), policy.copy(readTimeoutSeconds = 0),
+            policy.copy(maxRetryDelaySeconds = 6), policy.copy(maxAttempts = 0))) {
+            try { bad.validate(); fail("Invalid transfer timing accepted") } catch (_: IllegalArgumentException) { }
+        }
+    }
+
     @Test fun rejectsCommandInjectionAndUnsafeRemotePaths() {
         val base = TransferSettings("localhost", 21, "user", "secret", "/photos", TransferProtocol.FTP)
         for (bad in listOf(base.copy(user = "user\r\nDELE x"), base.copy(password = "a\nb"),

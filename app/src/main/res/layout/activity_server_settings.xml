@@ -25,6 +25,25 @@
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/hostFingerprintInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textNoSuggestions" android:singleLine="true" />
         </com.google.android.material.textfield.TextInputLayout>
             <com.google.android.material.button.MaterialButton android:id="@+id/trustHostButton" style="@style/Widget.RuangFoto.Transfer.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="end" android:text="@string/transfer_verify_host" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/timingSettingsButton" style="@style/Widget.RuangFoto.Transfer.TextButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/transfer_timing" />
+            <LinearLayout android:id="@+id/timingOptions" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/transfer_timing_hint" android:textColor="@color/transfer_muted" android:textSize="12sp" />
+        <com.google.android.material.textfield.TextInputLayout style="@style/Widget.RuangFoto.Transfer.Input" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:hint="@string/transfer_connect_timeout" >
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/connectTimeoutInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout style="@style/Widget.RuangFoto.Transfer.Input" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:hint="@string/transfer_read_timeout" >
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/readTimeoutInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout style="@style/Widget.RuangFoto.Transfer.Input" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:hint="@string/transfer_retry_delay" >
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/retryDelayInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout style="@style/Widget.RuangFoto.Transfer.Input" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:hint="@string/transfer_max_retry_delay" >
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/maxRetryDelayInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout style="@style/Widget.RuangFoto.Transfer.Input" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:hint="@string/transfer_max_attempts" >
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/maxAttemptsInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
             <com.google.android.material.button.MaterialButton android:id="@+id/testConnectionButton" style="@style/Widget.RuangFoto.Transfer.TextButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="@string/transfer_test" />
             <TextView android:id="@+id/serverStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:accessibilityLiveRegion="polite" android:textColor="@color/transfer_muted" android:textSize="13sp" />
         </LinearLayout>

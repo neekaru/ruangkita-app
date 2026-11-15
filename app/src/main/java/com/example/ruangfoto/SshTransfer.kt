@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit
 internal class SshTransfer : TransferClient {
     @Volatile private var ssh: SSHClient? = null
     @Volatile private var cancelled = false
+    private var commandTimeoutSeconds = 30L
 
     override fun cancel() {
         cancelled = true
@@ -123,8 +124,9 @@ internal class SshTransfer : TransferClient {
             }
             override fun findExistingAlgorithms(hostname: String, port: Int): List<String> = emptyList()
         })
-        client.setConnectTimeout(15_000)
-        client.setTimeout(30_000)
+        client.setConnectTimeout(settings.timing.connectTimeoutSeconds * 1000)
+        client.setTimeout(settings.timing.readTimeoutSeconds * 1000)
+        commandTimeoutSeconds = settings.timing.readTimeoutSeconds.toLong()
         ssh = client
         try {
             client.connect(settings.host, settings.port)
@@ -207,7 +209,7 @@ internal class SshTransfer : TransferClient {
         client.startSession().use { session ->
             val process = session.exec("$command 2>&1")
             val output = process.inputStream.bufferedReader().use { it.readText() }
-            process.join(35, TimeUnit.SECONDS)
+            process.join(commandTimeoutSeconds, TimeUnit.SECONDS)
             checkCancelled()
             return (process.exitStatus ?: -1) to output
         }
@@ -239,8 +241,8 @@ internal class SshTransfer : TransferClient {
             }
             override fun findExistingAlgorithms(hostname: String, port: Int): List<String> = emptyList()
         })
-        client.setConnectTimeout(15_000)
-        client.setTimeout(20_000)
+        client.setConnectTimeout(settings.timing.connectTimeoutSeconds * 1000)
+        client.setTimeout(settings.timing.readTimeoutSeconds * 1000)
         try {
             client.connect(settings.host, settings.port)
             return observed[0] ?: error("SSH server did not provide a host key")
