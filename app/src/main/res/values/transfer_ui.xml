@@ -1,0 +1,80 @@
+<resources>
+    <color name="transfer_background">#101411</color>
+    <color name="transfer_surface">#202A22</color>
+    <color name="transfer_border">#354137</color>
+    <color name="transfer_accent">#D5A85B</color>
+    <color name="transfer_text">#F2F4EC</color>
+    <color name="transfer_muted">#9BA69B</color>
+    <color name="transfer_stop">#DE998D</color>
+
+    <style name="Theme.RuangFoto.Transfers" parent="Theme.SonyGphotoTest">
+        <item name="colorPrimary">@color/transfer_accent</item>
+        <item name="colorPrimaryVariant">@color/transfer_surface</item>
+        <item name="colorSecondary">@color/transfer_accent</item>
+        <item name="colorOnPrimary">@color/transfer_background</item>
+        <item name="colorOnSurface">@color/transfer_text</item>
+        <item name="colorSurface">@color/transfer_surface</item>
+        <item name="android:colorBackground">@color/transfer_background</item>
+        <item name="android:textColorPrimary">@color/transfer_text</item>
+        <item name="android:textColorSecondary">@color/transfer_muted</item>
+        <item name="android:textColorHint">@color/transfer_muted</item>
+        <item name="android:statusBarColor">@color/transfer_background</item>
+        <item name="android:navigationBarColor">@color/transfer_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <style name="Widget.RuangFoto.Transfer.Button" parent="Widget.MaterialComponents.Button">
+        <item name="backgroundTint">@color/transfer_accent</item>
+        <item name="android:textColor">@color/transfer_background</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+    <style name="Widget.RuangFoto.Transfer.TextButton" parent="Widget.MaterialComponents.Button.TextButton">
+        <item name="android:textColor">@color/transfer_accent</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+    <style name="Widget.RuangFoto.Transfer.Input" parent="Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+        <item name="boxStrokeColor">@color/transfer_muted</item>
+        <item name="hintTextColor">@color/transfer_accent</item>
+        <item name="boxCornerRadiusTopStart">12dp</item>
+        <item name="boxCornerRadiusTopEnd">12dp</item>
+        <item name="boxCornerRadiusBottomStart">12dp</item>
+        <item name="boxCornerRadiusBottomEnd">12dp</item>
+    </style>
+
+    <string name="transfers_title">Transfers</string>
+    <string name="transfer_server_settings">Server settings</string>
+    <string name="transfer_back">Back</string>
+    <string name="transfer_no_server">Choose a server to start uploading</string>
+    <string name="transfer_auto_send">Auto-upload new photos</string>
+    <string name="transfer_recent_files">Recent uploads</string>
+    <string name="transfer_empty">No uploads yet</string>
+    <string name="transfer_pause">Pause uploads</string>
+    <string name="transfer_resume">Resume uploads</string>
+    <string name="transfer_retry">Retry failed uploads</string>
+    <string name="transfer_send_existing">Upload existing photos</string>
+    <string name="transfer_cancel">Cancel unfinished uploads</string>
+    <string name="transfer_protocol">Protocol</string>
+    <string name="transfer_host">Host or IP address</string>
+    <string name="transfer_port">Port</string>
+    <string name="transfer_user">Username</string>
+    <string name="transfer_password">Password</string>
+    <string name="transfer_folder">Destination folder</string>
+    <string name="transfer_browse">Browse folders</string>
+    <string name="transfer_fingerprint">SSH host fingerprint</string>
+    <string name="transfer_verify_host">Verify SSH host</string>
+    <string name="transfer_test">Test connection</string>
+    <string name="transfer_save">Save server</string>
+    <string name="transfer_timing">Timeouts and retry</string>
+    <string name="transfer_hide_timing">Hide timeout and retry settings</string>
+    <string name="transfer_connect_timeout">Connection timeout (seconds)</string>
+    <string name="transfer_read_timeout">Transfer / read timeout (seconds)</string>
+    <string name="transfer_retry_delay">Initial retry delay (seconds)</string>
+    <string name="transfer_max_retry_delay">Maximum retry delay (seconds)</string>
+    <string name="transfer_max_attempts">Maximum attempts</string>
+    <string name="transfer_timing_hint">Timeout changes apply to the next connection. Retry delay doubles up to your maximum.</string>
+    <string name="transfer_stop">Stop uploads</string>
+</resources>

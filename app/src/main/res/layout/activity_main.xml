@@ -277,6 +277,13 @@
                 android:textStyle="bold"
                 android:enabled="false" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/transfersButton"
+                style="@style/Widget.RuangFoto.Transfer.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/transfers_title"
+                android:textSize="12sp" />
         </LinearLayout>
 
         <!-- PREVIEW HEADER -->

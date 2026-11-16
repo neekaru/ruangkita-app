@@ -483,6 +483,9 @@ class MainActivity : AppCompatActivity() {
         binding.stopButton.setOnClickListener {
             requestSessionStop()
         }
+        binding.transfersButton.setOnClickListener {
+            startActivity(UploadActivity.intent(this, activeSessionDir))
+        }
 
         binding.stopButton.isEnabled = false
     }
@@ -1006,6 +1009,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         stopRequested.set(false)
+        resetStop()
 
         binding.stopButton.isEnabled = false
         binding.statusText.text = "Starting camera receiver..."
@@ -1030,6 +1034,13 @@ class MainActivity : AppCompatActivity() {
             1,
             TimeUnit.SECONDS
         )
+
+        UploadService.watching = true
+        activeSessionDir?.let { directory ->
+            if (UploadStore.get(this).rule(directory).enabled && !UploadStore.get(this).paused) {
+                runCatching { UploadService.startFromVisibleApp(this) }
+            }
+        }
 
         nativeExecutor.execute {
 
@@ -1084,6 +1095,7 @@ class MainActivity : AppCompatActivity() {
                 publishTask = null
 
                 nativeRunning.set(false)
+                UploadService.watching = false
                 stopRequested.set(false)
 
                 activeUsbDeviceName = null
@@ -1379,10 +1391,12 @@ class MainActivity : AppCompatActivity() {
     ): String
 
     external fun requestStop()
+    external fun resetStop()
 
     // =====================================
     // DESTROY
     // =====================================
+
 
     override fun onDestroy() {
 
