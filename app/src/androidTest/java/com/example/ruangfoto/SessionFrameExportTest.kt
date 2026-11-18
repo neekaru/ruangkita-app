@@ -39,8 +39,8 @@ class SessionFrameExportTest {
             designs.save(FrameDesign(overlay = overlay))
             assertNull(FrameDesignStore(File(directory, "second-session")).activeDesign())
             try {
-                designs.importOverlay(png(transparent = false).inputStream())
-                fail("An opaque replacement covered the entire photo")
+                designs.importOverlay(original.inputStream())
+                fail("A JPEG was accepted as a PNG frame")
             } catch (_: IllegalArgumentException) {
             }
 
@@ -62,18 +62,24 @@ class SessionFrameExportTest {
                 framed.recycle()
             }
 
+            val opaqueOverlay = designs.importOverlay(png(transparent = false).inputStream())
             val printSize = FramePrintSize(2.0, 4.0, FrameUnit.INCHES, 100)
-            val printDesign = FrameDesign(overlay = overlay, canvas = FrameCanvas.CUSTOM,
+            val printDesign = FrameDesign(overlay = opaqueOverlay, canvas = FrameCanvas.CUSTOM,
                 customSize = FrameSize(200, 400), printSize = printSize)
             designs.save(printDesign)
             assertEquals(printDesign, FrameDesignStore(directory).activeDesign())
             val printPhoto = cameraJpeg.copyTo(File(directory, "print.jpg"))
             assertTrue(session.renderNewPhotos(listOf(printPhoto)))
             val printFile = session.outputFor(printPhoto)
-            val printBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(printFile.path, printBounds)
-            assertEquals(200, printBounds.outWidth)
-            assertEquals(400, printBounds.outHeight)
+            val printed = checkNotNull(BitmapFactory.decodeFile(printFile.path))
+            try {
+                assertEquals(200, printed.width)
+                assertEquals(400, printed.height)
+                val pixel = printed.getPixel(100, 200)
+                assertTrue(Color.red(pixel) < 60 && Color.green(pixel) > 200 && Color.blue(pixel) > 200)
+            } finally {
+                printed.recycle()
+            }
             ExifInterface(printFile.path).apply {
                 assertEquals(100.0, getAttributeDouble(ExifInterface.TAG_X_RESOLUTION, 0.0), 0.0)
                 assertEquals(100.0, getAttributeDouble(ExifInterface.TAG_Y_RESOLUTION, 0.0), 0.0)

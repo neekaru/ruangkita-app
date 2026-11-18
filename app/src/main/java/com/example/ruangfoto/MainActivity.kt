@@ -7,6 +7,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.hardware.usb.UsbDevice
@@ -195,6 +196,7 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.receiverLayout.arrangeWorkspace()
 
         val rootView = binding.root
 
@@ -229,6 +231,11 @@ class MainActivity : AppCompatActivity() {
         setupButtons()
         setupSessionScreen()
         updateDashboard()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        binding.receiverLayout.arrangeWorkspace()
     }
 
     override fun onResume() {
@@ -528,7 +535,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateSessionFrameControls(directory: File) {
         val store = FrameDesignStore(directory)
         val enabled = runCatching { store.activeOverlay() != null }.getOrDefault(false)
-        binding.frameButton.setText(if (enabled) R.string.session_frame_on else R.string.session_frame_off)
+        binding.frameStatus.setText(if (enabled) R.string.session_frame_on else R.string.session_frame_off)
         val previousSeconds = previewSeconds
         previewSeconds = store.previewDurationSeconds()
         binding.previewPlaceholderText.setText(if (previewSeconds == 0) R.string.session_preview_off else R.string.session_preview_ready)

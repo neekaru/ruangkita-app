@@ -115,9 +115,12 @@ class FrameEditorActivity : AppCompatActivity() {
 
         binding = ActivityFrameEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.editorWorkspace.arrangeWorkspace()
+        binding.toolbar.subtitle = directory.name
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            binding.editorStage.visibility = if (insets.isVisible(WindowInsetsCompat.Type.ime())) View.GONE else View.VISIBLE
             insets
         }
 

@@ -2,7 +2,7 @@
 <resources>
     <string name="frame_editor_title">Frame editor</string>
     <string name="frame_editor_preview_description">Live frame preview</string>
-    <string name="frame_editor_preview_note">Photos show through the transparent areas. Drag a layer on the preview to move it.</string>
+    <string name="frame_editor_preview_note">Drag a layer on the preview to move it. Opaque areas cover the photo.</string>
     <string name="frame_editor_empty">No frame yet.\nChoose a PNG or add text below.</string>
 
     <string name="frame_editor_status_loading">Loading frame\u2026</string>
@@ -27,6 +27,8 @@
     <string name="frame_editor_custom_size">Frame size: %1$s</string>
     <string name="frame_editor_custom_size_value">%1$d × %2$d px</string>
     <string name="frame_editor_custom_size_title">Canvas size</string>
+    <string name="frame_editor_history_short">History</string>
+    <string name="frame_editor_add_label_short">Add text</string>
     <string name="frame_editor_custom_size_hint">Output: %1$d × %2$d px</string>
     <string name="frame_editor_custom_size_invalid">Use 64 to 2400 pixels per side, up to 6 megapixels.</string>
     <string name="frame_editor_size_mode_ratio">Aspect ratio</string>

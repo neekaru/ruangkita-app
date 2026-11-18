@@ -321,7 +321,7 @@ internal class FrameDesignStore(directory: File) {
         Files.deleteIfExists(activeFile.toPath())
     }
 
-    /** Validates and stores a PNG frame with a transparent opening; returns its internal asset reference. */
+    /** Validates and stores a PNG frame; returns its internal asset reference. */
     fun importOverlay(input: InputStream): String =
         importAsset(input, MAX_OVERLAY_BYTES, "overlay-", ".png", ::validateImportedOverlay)
 
@@ -670,12 +670,9 @@ internal class FrameDesignStore(directory: File) {
             bounds.outWidth.toLong() * bounds.outHeight <= MAX_OVERLAY_PIXELS) {
             "Choose a PNG up to $MAX_OVERLAY_SIDE pixels per side and 6 megapixels."
         }
-        val artwork = BitmapFactory.decodeFile(file.path) ?: throw IllegalArgumentException("Cannot read that PNG.")
-        try {
-            require(isOverlay(artwork)) { "The PNG needs both visible artwork and a transparent opening." }
-        } finally {
-            artwork.recycle()
-        }
+        val artwork = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = 8 })
+            ?: throw IllegalArgumentException("Cannot read that PNG.")
+        artwork.recycle()
     }
 
     private fun validateImportedFont(file: File) {
@@ -689,23 +686,6 @@ internal class FrameDesignStore(directory: File) {
         } catch (e: RuntimeException) {
             throw IllegalArgumentException("Choose a valid TrueType or OpenType font.", e)
         }
-    }
-
-    private fun isOverlay(artwork: Bitmap): Boolean {
-        if (!artwork.hasAlpha()) return false
-        var hasOpening = false
-        var hasArtwork = false
-        val row = IntArray(artwork.width)
-        for (y in 0 until artwork.height) {
-            artwork.getPixels(row, 0, artwork.width, 0, y, artwork.width, 1)
-            for (pixel in row) {
-                val alpha = pixel ushr 24
-                if (alpha < 255) hasOpening = true
-                if (alpha > 0) hasArtwork = true
-                if (hasOpening && hasArtwork) return true
-            }
-        }
-        return false
     }
 
     private fun writePng(bitmap: Bitmap, target: File) {
