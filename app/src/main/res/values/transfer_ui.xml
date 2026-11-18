@@ -50,6 +50,7 @@
     <string name="transfer_back">Back</string>
     <string name="transfer_no_server">Choose a server to start uploading</string>
     <string name="transfer_auto_send">Auto-upload new photos</string>
+    <string name="transfer_jpeg_includes_frames">JPEG uploads include original and framed copies.</string>
     <string name="transfer_recent_files">Recent uploads</string>
     <string name="transfer_empty">No uploads yet</string>
     <string name="transfer_pause">Pause uploads</string>

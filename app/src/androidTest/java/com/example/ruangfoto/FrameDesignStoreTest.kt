@@ -2,11 +2,15 @@ package com.ruangfoto.app
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import androidx.test.platform.app.InstrumentationRegistry
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -81,6 +85,80 @@ class FrameDesignStoreTest {
             }
         } finally {
             directory.deleteRecursively()
+        }
+    }
+
+    @Test fun keepsLayerOrderVisibilityAndCustomCanvasInTheRevision() {
+        val directory = File(
+            InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
+            "design-test-${UUID.randomUUID()}"
+        ).apply { check(mkdir()) }
+        try {
+            val store = FrameDesignStore(directory)
+            val overlay = store.importOverlay(topBandPng().inputStream())
+            val design = FrameDesign(
+                overlay = overlay,
+                labels = listOf(FrameLabel("Caption", visible = false), FrameLabel("Title")),
+                canvas = FrameCanvas.CUSTOM,
+                imageLayer = FramePlacement(x = 0.25f, y = 0.75f, scale = 1.5f, visible = false),
+                overlayZ = 1,
+                customSize = FrameSize(1200, 1600)
+            )
+            store.save(design)
+            assertEquals(design, FrameDesignStore(directory).activeDesign())
+
+            val overlayFile = checkNotNull(FrameDesignStore(directory).activeOverlay())
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(overlayFile.path, bounds)
+            // The saved frame is the exact canvas that was chosen, not a resampled guess.
+            assertEquals(1200, bounds.outWidth)
+            assertEquals(1600, bounds.outHeight)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test fun fitsTheImageInsideTheCanvasAndSkipsHiddenLayers() {
+        val directory = File(
+            InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
+            "design-test-${UUID.randomUUID()}"
+        ).apply { check(mkdir()) }
+        try {
+            val store = FrameDesignStore(directory)
+            val design = FrameDesign(
+                overlay = store.importOverlay(topBandPng().inputStream()),
+                labels = listOf(FrameLabel("R", x = 0.5f, y = 0.5f, size = 0.3f,
+                    color = Color.RED, visible = false)),
+                canvas = FrameCanvas.CUSTOM,
+                customSize = FrameSize(200, 200)
+            )
+            val preview = store.renderPreview(design, 200)
+            try {
+                assertEquals(200, preview.width)
+                assertEquals(200, preview.height)
+                // Pixel (100, 5) is inside the artwork only when the image is fitted, not cropped.
+                val band = preview.getPixel(100, 5)
+                assertTrue(Color.red(band) > 200 && Color.blue(band) < 60)
+                // The hidden text layer contributes nothing to the centre.
+                assertFalse(hasRedPixelNearCenter(preview))
+            } finally {
+                preview.recycle()
+            }
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    private fun topBandPng(): ByteArray {
+        val bitmap = Bitmap.createBitmap(60, 120, Bitmap.Config.ARGB_8888)
+        try {
+            Canvas(bitmap).drawRect(0f, 0f, 60f, 16f, Paint().apply { color = Color.RED })
+            return ByteArrayOutputStream().use {
+                assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                it.toByteArray()
+            }
+        } finally {
+            bitmap.recycle()
         }
     }
 

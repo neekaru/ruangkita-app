@@ -12,31 +12,33 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 
+internal fun framedPhotoDirectory(sessionDirectory: File): File = File(sessionDirectory, "Framed")
+
 internal class SessionFrame(directory: File) {
     private val designs = FrameDesignStore(directory)
-    val outputDirectory = File(directory, "Framed")
+    val outputDirectory = framedPhotoDirectory(directory)
 
     fun outputFor(photo: File): File = File(outputDirectory, photo.name)
 
     /** Returns false if any copy could not be saved. Original photos are never edited. */
     fun renderNewPhotos(photos: List<File>): Boolean {
         if (photos.isEmpty()) return true
-        val overlay = try {
-            designs.activeOverlay() ?: return true
+        val export = try {
+            designs.activeExport() ?: return true
         } catch (_: IOException) {
             return false
         } catch (_: IllegalArgumentException) {
             return false
         }
         if (!outputDirectory.isDirectory && !outputDirectory.mkdirs()) return false
-        val frame = BitmapFactory.decodeFile(overlay.path) ?: return false
+        val frame = BitmapFactory.decodeFile(export.overlay.path) ?: return false
         try {
             var saved = true
             for (photo in photos) {
                 val output = outputFor(photo)
                 if (output.exists()) continue
                 try {
-                    renderPhoto(photo, frame, output)
+                    renderPhoto(photo, frame, output, export.printDpi)
                 } catch (_: IOException) {
                     saved = false
                 }
@@ -47,7 +49,7 @@ internal class SessionFrame(directory: File) {
         }
     }
 
-    private fun renderPhoto(file: File, frame: Bitmap, output: File) {
+    private fun renderPhoto(file: File, frame: Bitmap, output: File, printDpi: Int?) {
         val orientation = ExifInterface(file.path).getAttributeInt(
             ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
         )
@@ -64,6 +66,14 @@ internal class SessionFrame(directory: File) {
                 writeAtomically(output) { staged ->
                     staged.outputStream().use { stream ->
                         if (!result.compress(Bitmap.CompressFormat.JPEG, 95, stream)) throw IOException("Cannot write JPEG")
+                    }
+                    if (printDpi != null) {
+                        ExifInterface(staged.path).apply {
+                            setAttribute(ExifInterface.TAG_X_RESOLUTION, "$printDpi/1")
+                            setAttribute(ExifInterface.TAG_Y_RESOLUTION, "$printDpi/1")
+                            setAttribute(ExifInterface.TAG_RESOLUTION_UNIT, "2") // EXIF: inches
+                            saveAttributes()
+                        }
                     }
                 }
             } finally {

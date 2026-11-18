@@ -2,7 +2,7 @@
 <resources>
     <string name="frame_editor_title">Frame editor</string>
     <string name="frame_editor_preview_description">Live frame preview</string>
-    <string name="frame_editor_preview_note">Photos show through the transparent areas. Drag text on the preview to move it.</string>
+    <string name="frame_editor_preview_note">Photos show through the transparent areas. Drag a layer on the preview to move it.</string>
     <string name="frame_editor_empty">No frame yet.\nChoose a PNG or add text below.</string>
 
     <string name="frame_editor_status_loading">Loading frame\u2026</string>
@@ -24,8 +24,38 @@
     <string name="frame_editor_redo">Redo</string>
 
     <string name="frame_editor_shape">Frame shape</string>
+    <string name="frame_editor_custom_size">Frame size: %1$s</string>
+    <string name="frame_editor_custom_size_value">%1$d × %2$d px</string>
+    <string name="frame_editor_custom_size_title">Canvas size</string>
+    <string name="frame_editor_custom_size_hint">Output: %1$d × %2$d px</string>
+    <string name="frame_editor_custom_size_invalid">Use 64 to 2400 pixels per side, up to 6 megapixels.</string>
+    <string name="frame_editor_size_mode_ratio">Aspect ratio</string>
+    <string name="frame_editor_size_mode_dimensions">Width and height</string>
+    <string name="frame_editor_size_unit">Canvas size unit</string>
+    <string name="frame_editor_print_dpi">Print DPI</string>
+    <string name="frame_editor_print_dpi_invalid">Enter a DPI from 1 to %1$d.</string>
+    <string name="frame_editor_print_size_value">%1$s × %2$s %3$s · %4$d DPI</string>
+    <string name="frame_editor_ratio_width">Width</string>
+    <string name="frame_editor_ratio_height">Height</string>
+    <string name="frame_editor_ratio_separator">×</string>
 
-    <string name="frame_editor_labels">Text and emoji</string>
+    <string name="frame_editor_layers">Layers</string>
+    <string name="frame_editor_layers_hint">Top of the list draws on top. Tap a layer to edit it, use the arrows to reorder, or drag it on the preview.</string>
+    <string name="frame_editor_layer_image">Frame image</string>
+    <string name="frame_editor_image_size">Image size</string>
+    <string name="frame_editor_remove_image">Remove image</string>
+    <string name="frame_editor_move_up">Up</string>
+    <string name="frame_editor_move_down">Down</string>
+    <string name="frame_editor_move_up_named">Move %1$s up</string>
+    <string name="frame_editor_move_down_named">Move %1$s down</string>
+    <string name="frame_editor_hide">Hide</string>
+    <string name="frame_editor_show">Show</string>
+    <string name="frame_editor_hide_named">Hide %1$s</string>
+    <string name="frame_editor_show_named">Show %1$s</string>
+    <string name="frame_editor_layer_state_selected">%1$s, selected</string>
+    <string name="frame_editor_layer_state_hidden">%1$s, hidden</string>
+    <string name="frame_editor_layer_state_hidden_selected">%1$s, hidden, selected</string>
+
     <string name="frame_editor_add_label">Add text or emoji</string>
     <string name="frame_editor_layer">Layer %1$d</string>
     <string name="frame_editor_new_label">Text</string>

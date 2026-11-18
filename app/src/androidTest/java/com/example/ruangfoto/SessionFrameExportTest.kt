@@ -62,6 +62,24 @@ class SessionFrameExportTest {
                 framed.recycle()
             }
 
+            val printSize = FramePrintSize(2.0, 4.0, FrameUnit.INCHES, 100)
+            val printDesign = FrameDesign(overlay = overlay, canvas = FrameCanvas.CUSTOM,
+                customSize = FrameSize(200, 400), printSize = printSize)
+            designs.save(printDesign)
+            assertEquals(printDesign, FrameDesignStore(directory).activeDesign())
+            val printPhoto = cameraJpeg.copyTo(File(directory, "print.jpg"))
+            assertTrue(session.renderNewPhotos(listOf(printPhoto)))
+            val printFile = session.outputFor(printPhoto)
+            val printBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(printFile.path, printBounds)
+            assertEquals(200, printBounds.outWidth)
+            assertEquals(400, printBounds.outHeight)
+            ExifInterface(printFile.path).apply {
+                assertEquals(100.0, getAttributeDouble(ExifInterface.TAG_X_RESOLUTION, 0.0), 0.0)
+                assertEquals(100.0, getAttributeDouble(ExifInterface.TAG_Y_RESOLUTION, 0.0), 0.0)
+                assertEquals(2, getAttributeInt(ExifInterface.TAG_RESOLUTION_UNIT, 0))
+            }
+
             designs.disable()
             val anotherJpeg = cameraJpeg.copyTo(File(directory, "next.jpg"))
             assertTrue(session.renderNewPhotos(listOf(anotherJpeg)))

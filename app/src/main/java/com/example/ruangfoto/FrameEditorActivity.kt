@@ -1,19 +1,25 @@
 package com.ruangfoto.app
 
 import android.content.Context
+import android.content.DialogInterface
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.RectF
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
+import android.text.TextUtils
 import android.text.TextWatcher
-import android.util.TypedValue
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.SeekBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,8 +30,10 @@ import androidx.core.os.BundleCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.ruangfoto.app.databinding.ActivityFrameEditorBinding
+import com.ruangfoto.app.databinding.DialogFrameCanvasBinding
 import java.io.File
 import java.io.IOException
+import java.math.RoundingMode
 import java.text.DateFormat
 import java.util.Date
 import java.util.concurrent.Executors
@@ -36,9 +44,9 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * Per-session frame workbench: overlay image, text/emoji layers, revisions and the
- * shot preview duration. Camera capture lives in MainActivity; saving here only writes
- * the session design, so it never interrupts a running session.
+ * Per-session frame workbench: an imported PNG, text/emoji layers, their stacking order,
+ * revisions and the shot preview duration. Camera capture lives in MainActivity; saving here
+ * only writes the session design, so it never interrupts a running session.
  */
 class FrameEditorActivity : AppCompatActivity() {
     private lateinit var binding: ActivityFrameEditorBinding
@@ -48,17 +56,20 @@ class FrameEditorActivity : AppCompatActivity() {
     private var savedDesign: FrameDesign? = null
     private var loadedRevisionId: String? = null
     private var previewDuration = FrameDesignStore.DEFAULT_PREVIEW_SECONDS
-    private var selectedIndex = 0
+    private var selectedZ = -1
     private var pendingFontLabel = -1
     private var busy = false
     private var busyMessage = 0
     private var bindingFields = false
     private var textEditRecorded = false
-    private var draggingLabel = -1
+    private var draggingZ = -1
     private var draggingMoved = false
     @Volatile private var destroyed = false
 
     private var previewBitmap: Bitmap? = null
+    private var thumbnailBitmap: Bitmap? = null
+    private var thumbnailRef: String? = null
+    private val layerNames = HashMap<Int, TextView>()
 
     private val undoStack = ArrayDeque<FrameDesign>()
     private val redoStack = ArrayDeque<FrameDesign>()
@@ -82,14 +93,14 @@ class FrameEditorActivity : AppCompatActivity() {
         override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
         override fun afterTextChanged(text: Editable?) {
             if (bindingFields || busy) return
-            val label = selectedLabel() ?: return
+            val index = selectedLabelIndex() ?: return
             val value = text?.toString().orEmpty()
-            if (label.text == value) return
+            if (draft.labels[index].text == value) return
             if (!textEditRecorded) {
                 recordEdit()
                 textEditRecorded = true
             }
-            updateSelectedLabel { it.copy(text = value) }
+            updateLabel(index) { it.copy(text = value) }
         }
     }
 
@@ -134,7 +145,7 @@ class FrameEditorActivity : AppCompatActivity() {
         if (!::binding.isInitialized) return
         outState.putBundle(STATE_DRAFT, designToBundle(draft))
         savedDesign?.let { outState.putBundle(STATE_SAVED, designToBundle(it)) }
-        outState.putInt(STATE_SELECTED, selectedIndex)
+        outState.putInt(STATE_SELECTED, selectedZ)
         outState.putString(STATE_REVISION, loadedRevisionId)
         outState.putInt(STATE_PENDING_FONT, pendingFontLabel)
     }
@@ -145,6 +156,8 @@ class FrameEditorActivity : AppCompatActivity() {
         worker.shutdown()
         previewBitmap?.recycle()
         previewBitmap = null
+        thumbnailBitmap?.recycle()
+        thumbnailBitmap = null
         super.onDestroy()
     }
 
@@ -161,21 +174,16 @@ class FrameEditorActivity : AppCompatActivity() {
                 if (bindingFields || busy) return
                 val canvas = FrameCanvas.entries.getOrNull(position) ?: return
                 if (draft.canvas == canvas) return
+                if (canvas == FrameCanvas.CUSTOM) {
+                    // The spinner already moved; the dialog decides the size or reverts it.
+                    showCustomSizeDialog()
+                    return
+                }
                 recordEdit()
                 draft = draft.copy(canvas = canvas)
                 requestPreview()
                 updateButtons()
                 updateStatus()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-
-        binding.labelSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (bindingFields || position == selectedIndex || position !in draft.labels.indices) return
-                selectedIndex = position
-                bindSelectedLabel()
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
@@ -186,9 +194,10 @@ class FrameEditorActivity : AppCompatActivity() {
         binding.overlayChooseButton.setOnClickListener { overlayPicker.launch(arrayOf("image/png")) }
         binding.overlayRemoveButton.setOnClickListener { removeOverlay() }
         binding.addLabelButton.setOnClickListener { addLabel() }
-        binding.removeLabelButton.setOnClickListener { removeSelectedLabel() }
+        binding.removeLabelButton.setOnClickListener { removeSelectedLayer() }
         binding.colorButton.setOnClickListener { chooseColor() }
         binding.fontButton.setOnClickListener { chooseFont() }
+        binding.customSizeButton.setOnClickListener { showCustomSizeDialog() }
         binding.undoButton.setOnClickListener { undo() }
         binding.redoButton.setOnClickListener { redo() }
         binding.historyButton.setOnClickListener { showHistory() }
@@ -207,12 +216,17 @@ class FrameEditorActivity : AppCompatActivity() {
     }
 
     private fun setupSeekBars() {
-        binding.sizeSeek.max = MAX_SIZE_PERCENT - MIN_SIZE_PERCENT
         binding.sizeSeek.setOnSeekBarChangeListener(seekListener(
             onProgress = { progress ->
-                val percent = progress + MIN_SIZE_PERCENT
-                binding.sizeValue.text = getString(R.string.frame_editor_percent, percent)
-                updateSelectedLabel { it.copy(size = percent / 100f) }
+                if (selectedIsImage()) {
+                    val percent = progress + MIN_IMAGE_PERCENT
+                    binding.sizeValue.text = getString(R.string.frame_editor_percent, percent)
+                    updateImageLayer { it.copy(scale = percent / 100f) }
+                } else {
+                    val percent = progress + MIN_SIZE_PERCENT
+                    binding.sizeValue.text = getString(R.string.frame_editor_percent, percent)
+                    updateSelectedLabel { it.copy(size = percent / 100f) }
+                }
             }
         ))
 
@@ -220,7 +234,8 @@ class FrameEditorActivity : AppCompatActivity() {
         binding.xSeek.setOnSeekBarChangeListener(seekListener(
             onProgress = { progress ->
                 binding.xValue.text = getString(R.string.frame_editor_percent, progress)
-                updateSelectedLabel { it.copy(x = progress / 100f) }
+                if (selectedIsImage()) updateImageLayer { it.copy(x = progress / 100f) }
+                else updateSelectedLabel { it.copy(x = progress / 100f) }
             }
         ))
 
@@ -228,7 +243,8 @@ class FrameEditorActivity : AppCompatActivity() {
         binding.ySeek.setOnSeekBarChangeListener(seekListener(
             onProgress = { progress ->
                 binding.yValue.text = getString(R.string.frame_editor_percent, progress)
-                updateSelectedLabel { it.copy(y = progress / 100f) }
+                if (selectedIsImage()) updateImageLayer { it.copy(y = progress / 100f) }
+                else updateSelectedLabel { it.copy(y = progress / 100f) }
             }
         ))
     }
@@ -239,7 +255,7 @@ class FrameEditorActivity : AppCompatActivity() {
             private var recorded = false
 
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                if (bindingFields || !fromUser || selectedLabel() == null) return
+                if (bindingFields || !fromUser || selectedZ !in 0 until draft.layerCount) return
                 if (!recorded) recordEdit()
                 recorded = tracking
                 onProgress(progress)
@@ -296,7 +312,7 @@ class FrameEditorActivity : AppCompatActivity() {
     private fun restoreState(state: Bundle) {
         state.getBundle(STATE_DRAFT)?.let { draft = designFromBundle(it) }
         savedDesign = state.getBundle(STATE_SAVED)?.let(::designFromBundle)
-        selectedIndex = state.getInt(STATE_SELECTED, 0)
+        selectedZ = state.getInt(STATE_SELECTED, -1)
         loadedRevisionId = state.getString(STATE_REVISION)
         pendingFontLabel = state.getInt(STATE_PENDING_FONT, -1)
     }
@@ -321,65 +337,75 @@ class FrameEditorActivity : AppCompatActivity() {
     }
 
     private fun bindAll() {
+        draft = draft.withClampedOrder()
         withoutFieldEvents { binding.canvasSpinner.setSelection(FrameCanvas.entries.indexOf(draft.canvas)) }
-        rebuildLabelChooser()
-        bindSelectedLabel()
+        bindSelection()
         updateButtons()
         updateStatus()
     }
 
-    private fun bindSelectedLabel() {
-        val label = draft.labels.getOrNull(selectedIndex)
-        binding.labelPanel.visibility = if (label == null) View.GONE else View.VISIBLE
-        if (label == null) {
-            textEditRecorded = false
-            updateButtons()
-            return
-        }
+    private fun bindSelection() {
+        if (selectedZ !in 0 until draft.layerCount) selectedZ = draft.topZ
+        val index = selectedLabelIndex()
+        val label = index?.let(draft.labels::get)
+        val hasLayer = selectedZ in 0 until draft.layerCount
 
-        withoutFieldEvents {
-            if (binding.labelTextInput.text.toString() != label.text) {
-                binding.labelTextInput.setText(label.text)
-                binding.labelTextInput.setSelection(binding.labelTextInput.length())
+        binding.labelPanel.visibility = if (hasLayer) View.VISIBLE else View.GONE
+        binding.labelTextLayout.visibility = if (label == null) View.GONE else View.VISIBLE
+        binding.colorButton.visibility = if (label == null) View.GONE else View.VISIBLE
+        binding.fontButton.visibility = if (label == null) View.GONE else View.VISIBLE
+        binding.sizeLabel.setText(if (label == null) R.string.frame_editor_image_size else R.string.frame_editor_size)
+        binding.removeLabelButton.setText(
+            if (label == null) R.string.frame_editor_remove_image else R.string.frame_editor_remove_label)
+
+        if (hasLayer) {
+            withoutFieldEvents {
+                if (label != null) {
+                    if (binding.labelTextInput.text.toString() != label.text) {
+                        binding.labelTextInput.setText(label.text)
+                        binding.labelTextInput.setSelection(binding.labelTextInput.length())
+                    }
+                    val sizePercent = (label.size * 100).roundToInt().coerceIn(MIN_SIZE_PERCENT, MAX_SIZE_PERCENT)
+                    binding.sizeSeek.max = MAX_SIZE_PERCENT - MIN_SIZE_PERCENT
+                    binding.sizeSeek.progress = sizePercent - MIN_SIZE_PERCENT
+                    binding.sizeValue.text = getString(R.string.frame_editor_percent, sizePercent)
+                } else {
+                    val scalePercent = (draft.imageLayer.scale * 100).roundToInt()
+                        .coerceIn(MIN_IMAGE_PERCENT, MAX_IMAGE_PERCENT)
+                    binding.sizeSeek.max = MAX_IMAGE_PERCENT - MIN_IMAGE_PERCENT
+                    binding.sizeSeek.progress = scalePercent - MIN_IMAGE_PERCENT
+                    binding.sizeValue.text = getString(R.string.frame_editor_percent, scalePercent)
+                }
+
+                val x = label?.x ?: draft.imageLayer.x
+                val xPercent = (x * 100).roundToInt().coerceIn(0, 100)
+                binding.xSeek.progress = xPercent
+                binding.xValue.text = getString(R.string.frame_editor_percent, xPercent)
+
+                val y = label?.y ?: draft.imageLayer.y
+                val yPercent = (y * 100).roundToInt().coerceIn(0, 100)
+                binding.ySeek.progress = yPercent
+                binding.yValue.text = getString(R.string.frame_editor_percent, yPercent)
+
+                if (label != null) {
+                    val colorName = LabelColor.entries.firstOrNull { it.argb == label.color }
+                        ?.let { getString(it.labelRes) }
+                        ?: getString(R.string.frame_editor_custom)
+                    binding.colorButton.text = getString(R.string.frame_editor_color_value, colorName)
+                    binding.fontButton.text = getString(R.string.frame_editor_font_value,
+                        getString(if (label.font == null) R.string.frame_editor_system else R.string.frame_editor_custom))
+                }
             }
-
-            val sizePercent = (label.size * 100).roundToInt().coerceIn(MIN_SIZE_PERCENT, MAX_SIZE_PERCENT)
-            binding.sizeSeek.progress = sizePercent - MIN_SIZE_PERCENT
-            binding.sizeValue.text = getString(R.string.frame_editor_percent, sizePercent)
-
-            val xPercent = (label.x * 100).roundToInt().coerceIn(0, 100)
-            binding.xSeek.progress = xPercent
-            binding.xValue.text = getString(R.string.frame_editor_percent, xPercent)
-
-            val yPercent = (label.y * 100).roundToInt().coerceIn(0, 100)
-            binding.ySeek.progress = yPercent
-            binding.yValue.text = getString(R.string.frame_editor_percent, yPercent)
         }
-
-        val colorName = LabelColor.entries.firstOrNull { it.argb == label.color }
-            ?.let { getString(it.labelRes) }
-            ?: getString(R.string.frame_editor_custom)
-        binding.colorButton.text = getString(R.string.frame_editor_color_value, colorName)
-        binding.fontButton.text = getString(R.string.frame_editor_font_value,
-            getString(if (label.font == null) R.string.frame_editor_system else R.string.frame_editor_custom))
 
         textEditRecorded = false
+        rebuildLayerPanel()
+        updateSelectionBox()
         updateButtons()
     }
 
-    private fun rebuildLabelChooser() {
-        val names = draft.labels.indices.map { getString(R.string.frame_editor_layer, it + 1) }
-        withoutFieldEvents {
-            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, names)
-            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            binding.labelSpinner.adapter = adapter
-            if (selectedIndex !in draft.labels.indices) selectedIndex = draft.labels.lastIndex
-            if (selectedIndex >= 0) binding.labelSpinner.setSelection(selectedIndex)
-        }
-        binding.labelSpinner.visibility = if (draft.labels.isEmpty()) View.GONE else View.VISIBLE
-    }
-
     private fun updateButtons() {
+        val hasLayer = selectedZ in 0 until draft.layerCount
         val hasLabel = selectedLabel() != null
         val content = hasContent(draft)
         binding.saveButton.isEnabled = !busy && content && (isDirty() || loadedRevisionId != null)
@@ -392,18 +418,25 @@ class FrameEditorActivity : AppCompatActivity() {
         binding.overlayChooseButton.isEnabled = !busy
         binding.overlayRemoveButton.isEnabled = !busy && draft.overlay != null
         binding.canvasSpinner.isEnabled = !busy
-        binding.labelSpinner.isEnabled = !busy && draft.labels.isNotEmpty()
-        binding.removeLabelButton.isEnabled = !busy && hasLabel
+        binding.customSizeButton.isEnabled = !busy
+        binding.customSizeButton.visibility =
+            if (draft.canvas == FrameCanvas.CUSTOM) View.VISIBLE else View.GONE
+        val print = draft.printSize
+        val sizeText = if (print != null) {
+            getString(R.string.frame_editor_print_size_value, formatMeasure(print.width),
+                formatMeasure(print.height), print.unit.symbol, print.dpi)
+        } else getString(R.string.frame_editor_custom_size_value, draft.customSize.width, draft.customSize.height)
+        binding.customSizeButton.text = getString(R.string.frame_editor_custom_size, sizeText)
+        binding.removeLabelButton.isEnabled = !busy && hasLayer
         binding.colorButton.isEnabled = !busy && hasLabel
         binding.fontButton.isEnabled = !busy && hasLabel
         binding.labelTextInput.isEnabled = !busy && hasLabel
-        binding.sizeSeek.isEnabled = !busy && hasLabel
-        binding.xSeek.isEnabled = !busy && hasLabel
-        binding.ySeek.isEnabled = !busy && hasLabel
+        binding.sizeSeek.isEnabled = !busy && hasLayer
+        binding.xSeek.isEnabled = !busy && hasLayer
+        binding.ySeek.isEnabled = !busy && hasLayer
         binding.previewDurationSeek.isEnabled = !busy
         binding.overlayChooseButton.setText(
             if (draft.overlay != null) R.string.frame_editor_replace_png else R.string.frame_editor_choose_png)
-        binding.labelSpinner.visibility = if (draft.labels.isEmpty()) View.GONE else View.VISIBLE
         binding.previewEmpty.visibility = if (content) View.GONE else View.VISIBLE
     }
 
@@ -476,48 +509,71 @@ class FrameEditorActivity : AppCompatActivity() {
     }
 
     private fun restoreDraft(design: FrameDesign) {
-        draft = design
-        if (selectedIndex !in design.labels.indices) selectedIndex = design.labels.lastIndex
-        withoutFieldEvents { binding.canvasSpinner.setSelection(FrameCanvas.entries.indexOf(design.canvas)) }
-        rebuildLabelChooser()
-        bindSelectedLabel()
+        draft = design.withClampedOrder()
+        if (selectedZ !in 0 until draft.layerCount) selectedZ = draft.topZ
+        withoutFieldEvents { binding.canvasSpinner.setSelection(FrameCanvas.entries.indexOf(draft.canvas)) }
+        bindSelection()
         requestPreview()
         updateButtons()
     }
 
-    private fun selectedLabel(): FrameLabel? = draft.labels.getOrNull(selectedIndex)
+    private fun selectedLabelIndex(): Int? =
+        if (selectedZ in 0 until draft.layerCount) draft.labelIndexAt(selectedZ) else null
 
-    private fun updateSelectedLabel(change: (FrameLabel) -> FrameLabel) =
-        updateSelectedLabelAt(selectedIndex, change)
+    private fun selectedLabel(): FrameLabel? = selectedLabelIndex()?.let(draft.labels::get)
 
-    private fun updateSelectedLabelAt(index: Int, change: (FrameLabel) -> FrameLabel) {
+    private fun selectedIsImage(): Boolean = draft.isImageLayer(selectedZ)
+
+    private fun updateSelectedLabel(change: (FrameLabel) -> FrameLabel) {
+        selectedLabelIndex()?.let { updateLabel(it, change) }
+    }
+
+    private fun updateLabel(index: Int, change: (FrameLabel) -> FrameLabel) {
         if (index !in draft.labels.indices) return
         draft = draft.copy(labels = draft.labels.mapIndexed { i, label ->
             if (i == index) change(label) else label
         })
+        refreshLayerName(draft.zForLabel(index), index)
         requestPreview()
         updateButtons()
+    }
+
+    private fun updateImageLayer(change: (FramePlacement) -> FramePlacement) {
+        if (!selectedIsImage()) return
+        draft = draft.copy(imageLayer = change(draft.imageLayer))
+        requestPreview()
+        updateButtons()
+    }
+
+    private fun selectLayer(z: Int) {
+        if (busy || z !in 0 until draft.layerCount) return
+        selectedZ = z
+        bindSelection()
     }
 
     private fun addLabel() {
         if (draft.labels.size >= MAX_LABELS) return
         recordEdit()
         draft = draft.copy(labels = draft.labels + FrameLabel(getString(R.string.frame_editor_new_label)))
-        selectedIndex = draft.labels.lastIndex
-        rebuildLabelChooser()
-        bindSelectedLabel()
+        selectedZ = draft.zForLabel(draft.labels.lastIndex)
+        bindSelection()
         requestPreview()
         binding.labelTextInput.requestFocus()
         binding.labelTextInput.selectAll()
     }
 
-    private fun removeSelectedLabel() {
-        if (selectedIndex !in draft.labels.indices) return
+    private fun removeSelectedLayer() {
+        if (selectedZ !in 0 until draft.layerCount) return
         recordEdit()
-        draft = draft.copy(labels = draft.labels.filterIndexed { i, _ -> i != selectedIndex })
-        selectedIndex = selectedIndex.coerceAtMost(draft.labels.lastIndex)
-        rebuildLabelChooser()
-        bindSelectedLabel()
+        val index = draft.labelIndexAt(selectedZ)
+        draft = if (index == null) {
+            draft.copy(overlay = null).withClampedOrder()
+        } else {
+            draft.withLabelRemoved(index)
+        }
+        if (index == null) thumbnailRef = null
+        selectedZ = selectedZ.coerceAtMost(draft.topZ)
+        bindSelection()
         requestPreview()
         updateStatus()
     }
@@ -525,9 +581,38 @@ class FrameEditorActivity : AppCompatActivity() {
     private fun removeOverlay() {
         if (draft.overlay == null) return
         recordEdit()
-        draft = draft.copy(overlay = null)
+        draft = draft.copy(overlay = null).withClampedOrder()
+        thumbnailRef = null
+        if (selectedZ !in 0 until draft.layerCount) selectedZ = draft.topZ
+        bindSelection()
         requestPreview()
-        updateButtons()
+        updateStatus()
+    }
+
+    private fun moveLayer(z: Int, delta: Int) {
+        if (busy) return
+        val moved = draft.layerMoved(z, delta)
+        if (moved == draft) return
+        recordEdit()
+        draft = moved
+        selectedZ = z + delta
+        bindSelection()
+        requestPreview()
+        updateStatus()
+    }
+
+    private fun toggleLayerVisibility(z: Int) {
+        if (busy || z !in 0 until draft.layerCount) return
+        recordEdit()
+        val index = draft.labelIndexAt(z)
+        draft = if (index == null) {
+            draft.copy(imageLayer = draft.imageLayer.copy(visible = !draft.imageLayer.visible))
+        } else {
+            val label = draft.labels[index]
+            draft.copy(labels = draft.labels.toMutableList().apply { set(index, label.copy(visible = !label.visible)) })
+        }
+        bindSelection()
+        requestPreview()
         updateStatus()
     }
 
@@ -542,7 +627,7 @@ class FrameEditorActivity : AppCompatActivity() {
                 if (color != label.color) {
                     recordEdit()
                     updateSelectedLabel { it.copy(color = color) }
-                    bindSelectedLabel()
+                    bindSelection()
                 }
                 dialog.dismiss()
             }
@@ -560,15 +645,275 @@ class FrameEditorActivity : AppCompatActivity() {
                     if (label.font != null) {
                         recordEdit()
                         updateSelectedLabel { it.copy(font = null) }
-                        bindSelectedLabel()
+                        bindSelection()
                     }
                 } else {
-                    pendingFontLabel = selectedIndex
+                    pendingFontLabel = selectedLabelIndex() ?: return@setItems
                     fontPicker.launch(arrayOf("*/*"))
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Canvas size
+
+    private fun showCustomSizeDialog() {
+        val fields = DialogFrameCanvasBinding.inflate(layoutInflater)
+        val current = draft.customSize
+        val print = draft.printSize
+        var unit = print?.unit ?: FrameUnit.PIXELS
+        val divisor = gcd(current.width, current.height)
+        fields.ratioWidth.setText((current.width / divisor).toString())
+        fields.ratioHeight.setText((current.height / divisor).toString())
+        fields.sizeWidth.setText(print?.let { formatMeasure(it.width) } ?: current.width.toString())
+        fields.sizeHeight.setText(print?.let { formatMeasure(it.height) } ?: current.height.toString())
+        fields.printDpi.setText((print?.dpi ?: DEFAULT_PRINT_DPI).toString())
+        fields.sizeUnit.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            FrameUnit.entries.map { it.symbol })
+        fields.sizeUnit.setSelection(unit.ordinal)
+        if (draft.canvas == FrameCanvas.CUSTOM) fields.sizeModeGroup.check(R.id.dimensionsMode)
+
+        fun dimensionsSelected() = fields.sizeModeGroup.checkedRadioButtonId == R.id.dimensionsMode
+        fun enteredDpi() = fields.printDpi.text.toString().toIntOrNull()?.takeIf { it in 1..MAX_PRINT_DPI }
+
+        fun printSize(): FramePrintSize? {
+            if (!dimensionsSelected() || unit == FrameUnit.PIXELS) return null
+            val dpi = enteredDpi() ?: return null
+            val width = parseMeasure(fields.sizeWidth.text) ?: return null
+            val height = parseMeasure(fields.sizeHeight.text) ?: return null
+            return FramePrintSize(width, height, unit, dpi)
+        }
+
+        fun chosenSize(printSize: FramePrintSize?): FrameSize? {
+            val size = if (!dimensionsSelected()) {
+                val width = fields.ratioWidth.text.toString().toIntOrNull() ?: return null
+                val height = fields.ratioHeight.text.toString().toIntOrNull() ?: return null
+                if (width !in 1..MAX_RATIO || height !in 1..MAX_RATIO) return null
+                customCanvasSizeFromRatio(width, height, MAX_CUSTOM_SIDE)
+            } else if (unit == FrameUnit.PIXELS) {
+                val width = fields.sizeWidth.text.toString().toIntOrNull() ?: return null
+                val height = fields.sizeHeight.text.toString().toIntOrNull() ?: return null
+                FrameSize(width, height)
+            } else printSize?.toPixels() ?: return null
+            return size.takeIf { isValidCustomSize(it) && it.width >= MIN_CUSTOM_SIDE && it.height >= MIN_CUSTOM_SIDE }
+        }
+
+        fun refreshDialog() {
+            val dimensions = dimensionsSelected()
+            val usesDpi = dimensions && unit != FrameUnit.PIXELS
+            fields.ratioRow.visibility = if (dimensions) View.GONE else View.VISIBLE
+            fields.dimensionsFields.visibility = if (dimensions) View.VISIBLE else View.GONE
+            fields.printDpi.visibility = if (usesDpi) View.VISIBLE else View.GONE
+            val size = chosenSize(printSize())
+            fields.sizeHint.text = when {
+                usesDpi && enteredDpi() == null -> getString(R.string.frame_editor_print_dpi_invalid, MAX_PRINT_DPI)
+                size == null -> getString(R.string.frame_editor_custom_size_invalid)
+                else -> getString(R.string.frame_editor_custom_size_hint, size.width, size.height)
+            }
+        }
+
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(text: Editable?) = refreshDialog()
+        }
+        listOf(fields.ratioWidth, fields.ratioHeight, fields.sizeWidth, fields.sizeHeight, fields.printDpi)
+            .forEach { it.addTextChangedListener(watcher) }
+        fields.sizeModeGroup.setOnCheckedChangeListener { _, _ -> refreshDialog() }
+        fields.sizeUnit.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
+                val next = FrameUnit.entries[position]
+                if (next == unit) return
+                val dpi = enteredDpi() ?: DEFAULT_PRINT_DPI
+                val factor = unit.pixelsPerUnit(dpi) / next.pixelsPerUnit(dpi)
+                unit = next
+                for (field in listOf(fields.sizeWidth, fields.sizeHeight)) {
+                    val converted = parseMeasure(field.text)?.times(factor) ?: continue
+                    field.setText(if (unit == FrameUnit.PIXELS) converted.roundToInt().toString() else
+                        converted.toBigDecimal().setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString())
+                }
+                refreshDialog()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>) = Unit
+        }
+        refreshDialog()
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.frame_editor_custom_size_title)
+            .setView(fields.root)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+                val printSize = printSize()
+                val size = chosenSize(printSize)
+                if (size == null) {
+                    Toast.makeText(this, fields.sizeHint.text, Toast.LENGTH_SHORT).show()
+                } else {
+                    applyCustomSize(size, printSize)
+                    dialog.dismiss()
+                }
+            }
+        }
+        // Choosing Custom from the spinner only sticks once a size is confirmed.
+        dialog.setOnDismissListener {
+            if (draft.canvas != FrameCanvas.CUSTOM) {
+                withoutFieldEvents {
+                    binding.canvasSpinner.setSelection(FrameCanvas.entries.indexOf(draft.canvas))
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun parseMeasure(text: CharSequence): Double? =
+        text.toString().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 && it <= 1e9 }
+
+    private fun formatMeasure(value: Double): String =
+        value.toBigDecimal().stripTrailingZeros().toPlainString()
+
+    private fun applyCustomSize(size: FrameSize, printSize: FramePrintSize?) {
+        if (draft.canvas == FrameCanvas.CUSTOM && draft.customSize == size && draft.printSize == printSize) return
+        recordEdit()
+        draft = draft.copy(canvas = FrameCanvas.CUSTOM, customSize = size, printSize = printSize)
+        requestPreview()
+        updateButtons()
+        updateStatus()
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Layer panel
+
+    private fun rebuildLayerPanel() {
+        binding.layerList.removeAllViews()
+        layerNames.clear()
+        if (draft.layerCount == 0) {
+            binding.layerList.visibility = View.GONE
+            return
+        }
+        binding.layerList.visibility = View.VISIBLE
+        for (z in draft.topZ downTo 0) binding.layerList.addView(layerRow(z))
+    }
+
+    private fun layerRow(z: Int): View {
+        val index = draft.labelIndexAt(z)
+        val label = index?.let(draft.labels::get)
+        val name = layerName(index)
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(48f)
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(4f), 0, dp(4f), 0)
+            background = rowBackground(z == selectedZ)
+            contentDescription = rowDescription(name, z == selectedZ, draft.isVisible(z))
+            setOnClickListener { selectLayer(z) }
+        }
+
+        if (label == null) {
+            val thumb = overlayThumbnail()
+            if (thumb != null) {
+                row.addView(ImageView(this).apply {
+                    setImageBitmap(thumb)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = name
+                }, LinearLayout.LayoutParams(dp(36f), dp(36f)))
+            } else {
+                row.addView(layerBadge("PNG"))
+            }
+        } else {
+            row.addView(layerBadge("T"))
+        }
+
+        val title = TextView(this).apply {
+            text = name
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setTextColor(ContextCompat.getColor(this@FrameEditorActivity, R.color.transfer_text))
+            textSize = 15f
+            setPadding(dp(8f), 0, dp(8f), 0)
+        }
+        layerNames[z] = title
+        row.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+        row.addView(rowAction(R.string.frame_editor_move_up, R.string.frame_editor_move_up_named, name,
+            enabled = z < draft.topZ) { moveLayer(z, 1) })
+        row.addView(rowAction(R.string.frame_editor_move_down, R.string.frame_editor_move_down_named, name,
+            enabled = z > 0) { moveLayer(z, -1) })
+        val visible = draft.isVisible(z)
+        row.addView(rowAction(
+            if (visible) R.string.frame_editor_hide else R.string.frame_editor_show,
+            if (visible) R.string.frame_editor_hide_named else R.string.frame_editor_show_named,
+            name
+        ) { toggleLayerVisibility(z) })
+        return row
+    }
+
+    private fun layerBadge(text: String): TextView = TextView(this).apply {
+        this.text = text
+        gravity = Gravity.CENTER
+        setTextColor(ContextCompat.getColor(this@FrameEditorActivity, R.color.transfer_muted))
+        textSize = 12f
+        layoutParams = LinearLayout.LayoutParams(dp(36f), dp(36f))
+    }
+
+    private fun rowAction(textRes: Int, descriptionRes: Int, name: String, enabled: Boolean = true,
+                          action: () -> Unit): TextView = TextView(this).apply {
+        text = getString(textRes)
+        contentDescription = getString(descriptionRes, name)
+        gravity = Gravity.CENTER
+        setTextColor(ContextCompat.getColor(context,
+            if (enabled) R.color.transfer_accent else R.color.transfer_muted))
+        textSize = 12f
+        isEnabled = enabled
+        isClickable = true
+        isFocusable = true
+        layoutParams = LinearLayout.LayoutParams(dp(48f), dp(48f))
+        setOnClickListener { if (isEnabled) action() }
+    }
+
+    private fun rowBackground(selected: Boolean): GradientDrawable {
+        val density = resources.displayMetrics.density
+        return GradientDrawable().apply {
+            cornerRadius = 12f * density
+            setColor(ContextCompat.getColor(this@FrameEditorActivity, R.color.transfer_surface))
+            setStroke(((if (selected) 2 else 1) * density).roundToInt(),
+                ContextCompat.getColor(this@FrameEditorActivity,
+                    if (selected) R.color.transfer_accent else R.color.transfer_border))
+        }
+    }
+
+    private fun layerName(index: Int?): String {
+        if (index == null) return getString(R.string.frame_editor_layer_image)
+        val line = draft.labels[index].text.lineSequence().firstOrNull().orEmpty().trim()
+        return if (line.isEmpty()) getString(R.string.frame_editor_layer, index + 1)
+        else if (line.length > MAX_LAYER_NAME_CHARS) line.take(MAX_LAYER_NAME_CHARS) else line
+    }
+
+    private fun rowDescription(name: String, selected: Boolean, visible: Boolean): String = when {
+        selected && !visible -> getString(R.string.frame_editor_layer_state_hidden_selected, name)
+        selected -> getString(R.string.frame_editor_layer_state_selected, name)
+        !visible -> getString(R.string.frame_editor_layer_state_hidden, name)
+        else -> name
+    }
+
+    private fun refreshLayerName(z: Int, index: Int) {
+        layerNames[z]?.text = layerName(index)
+    }
+
+    private fun overlayThumbnail(): Bitmap? {
+        val reference = draft.overlay ?: return null
+        if (thumbnailRef != reference) {
+            thumbnailBitmap?.recycle()
+            thumbnailBitmap = store.overlayThumbnail(reference)
+            thumbnailRef = reference
+        }
+        return thumbnailBitmap
     }
 
     // -------------------------------------------------------------------------------------
@@ -589,9 +934,11 @@ class FrameEditorActivity : AppCompatActivity() {
                 setBusy(false)
                 result.onSuccess { overlay ->
                     recordEdit()
-                    draft = draft.copy(overlay = overlay)
+                    draft = draft.copy(overlay = overlay).withClampedOrder()
+                    thumbnailRef = null
+                    selectedZ = draft.overlayZ
+                    bindSelection()
                     requestPreview()
-                    updateButtons()
                     updateStatus()
                 }.onFailure { showError(getString(R.string.frame_editor_import_failed)) }
             }
@@ -612,8 +959,8 @@ class FrameEditorActivity : AppCompatActivity() {
                 result.onSuccess { font ->
                     if (index in draft.labels.indices) {
                         recordEdit()
-                        updateSelectedLabelAt(index) { it.copy(font = font) }
-                        if (index == selectedIndex) bindSelectedLabel()
+                        updateLabel(index) { it.copy(font = font) }
+                        if (index == selectedLabelIndex()) bindSelection()
                     }
                 }.onFailure { showError(getString(R.string.frame_editor_font_failed)) }
             }
@@ -625,7 +972,7 @@ class FrameEditorActivity : AppCompatActivity() {
 
     private fun saveFrame(message: String) {
         if (busy) return
-        val design = draft.copy(labels = draft.labels.filter { it.text.isNotBlank() })
+        val design = draft.withoutBlankLabels()
         if (!hasContent(design)) return
         // Let the preview drain finish so the save is not queued behind constant dragging.
         pendingPreview.set(null)
@@ -640,7 +987,7 @@ class FrameEditorActivity : AppCompatActivity() {
                     savedDesign = design
                     draft = design
                     loadedRevisionId = null
-                    bindAll()
+                    bindSelection()
                     requestPreview()
                     Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
                 }.onFailure { showError(getString(R.string.frame_editor_save_failed)) }
@@ -673,9 +1020,10 @@ class FrameEditorActivity : AppCompatActivity() {
                     loadedRevisionId = null
                     undoStack.clear()
                     redoStack.clear()
-                    selectedIndex = 0
+                    selectedZ = -1
+                    thumbnailRef = null
                     clearPreview()
-                    bindAll()
+                    bindSelection()
                     Toast.makeText(this, R.string.frame_editor_turned_off, Toast.LENGTH_SHORT).show()
                 }.onFailure { showError(getString(R.string.frame_editor_disable_failed)) }
             }
@@ -720,7 +1068,8 @@ class FrameEditorActivity : AppCompatActivity() {
                 result.onSuccess { design ->
                     recordEdit()
                     loadedRevisionId = id
-                    selectedIndex = 0
+                    selectedZ = design.topZ
+                    thumbnailRef = null
                     restoreDraft(design)
                     updateStatus()
                 }.onFailure { showError(getString(R.string.frame_editor_revision_failed)) }
@@ -755,9 +1104,7 @@ class FrameEditorActivity : AppCompatActivity() {
         try {
             while (true) {
                 val design = pendingPreview.getAndSet(null) ?: break
-                val bitmap = runCatching {
-                    store.renderPreview(design.copy(labels = design.labels.filter { it.text.isNotEmpty() }))
-                }.getOrNull()
+                val bitmap = runCatching { store.renderPreview(design) }.getOrNull()
                 runOnUiThread {
                     if (destroyed) {
                         if (bitmap !== previewBitmap) bitmap?.recycle()
@@ -782,36 +1129,61 @@ class FrameEditorActivity : AppCompatActivity() {
         previewBitmap = bitmap
         binding.previewImage.setImageBitmap(bitmap)
         if (previous !== bitmap) previous?.recycle()
+        updateSelectionBox()
     }
 
     private fun clearPreview() {
         binding.previewImage.setImageBitmap(null)
         previewBitmap?.recycle()
         previewBitmap = null
+        binding.selectionOverlay.showSelection(null)
+    }
+
+    private fun updateSelectionBox() {
+        val bitmap = previewBitmap
+        val frame = bitmap?.let(::imageRect)
+        val bounds = if (bitmap != null && frame != null && selectedZ in 0 until draft.layerCount &&
+            draft.isVisible(selectedZ)) {
+            store.layerBounds(draft, selectedZ, bitmap.width, bitmap.height)
+        } else {
+            null
+        }
+        if (bitmap == null || frame == null || bounds == null) {
+            binding.selectionOverlay.showSelection(null)
+            return
+        }
+        val scaleX = frame.width() / bitmap.width
+        val scaleY = frame.height() / bitmap.height
+        val padding = dp(3f).toFloat()
+        binding.selectionOverlay.showSelection(RectF(
+            frame.left + bounds.left * scaleX - padding,
+            frame.top + bounds.top * scaleY - padding,
+            frame.left + bounds.right * scaleX + padding,
+            frame.top + bounds.bottom * scaleY + padding
+        ))
     }
 
     // -------------------------------------------------------------------------------------
-    // Drag a label on the live preview
+    // Drag a layer on the live preview
 
     private fun handlePreviewTouch(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                draggingLabel = -1
+                draggingZ = -1
                 return startDrag(event.x, event.y)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (draggingLabel < 0) return false
+                if (draggingZ < 0) return false
                 moveDrag(event.x, event.y)
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                val wasDragging = draggingLabel >= 0
-                draggingLabel = -1
+                val wasDragging = draggingZ >= 0
+                draggingZ = -1
                 if (wasDragging) {
                     binding.previewImage.parent.requestDisallowInterceptTouchEvent(false)
                     draggingMoved = false
-                    bindSelectedLabel()
-                    updateButtons()
+                    bindSelection()
                     updateStatus()
                 }
                 return wasDragging
@@ -825,34 +1197,43 @@ class FrameEditorActivity : AppCompatActivity() {
         val bitmap = previewBitmap ?: return false
         val rect = imageRect(bitmap) ?: return false
         if (!rect.contains(x, y)) return false
-        val nx = (x - rect.left) / rect.width()
-        val ny = (y - rect.top) / rect.height()
-        var best = -1
-        var bestDistance = dp(40f).toFloat()
-        draft.labels.forEachIndexed { index, label ->
-            val dx = (label.x - nx) * rect.width()
-            val dy = (label.y - ny) * rect.height()
-            val distance = sqrt(dx * dx + dy * dy)
-            if (distance <= bestDistance) {
-                bestDistance = distance
-                best = index
-            }
-        }
-        if (best < 0) return false
-        draggingLabel = best
+        val z = hitTest((x - rect.left) / rect.width() * bitmap.width,
+            (y - rect.top) / rect.height() * bitmap.height, bitmap)
+        if (z < 0) return false
+        draggingZ = z
         draggingMoved = false
         binding.previewImage.parent.requestDisallowInterceptTouchEvent(true)
-        if (selectedIndex != best) {
-            selectedIndex = best
-            withoutFieldEvents { binding.labelSpinner.setSelection(best) }
-            bindSelectedLabel()
-        }
+        if (selectedZ != z) selectLayer(z)
         return true
     }
 
+    /** Topmost visible layer under the touch, else the nearest text centre. */
+    private fun hitTest(x: Float, y: Float, bitmap: Bitmap): Int {
+        val padding = dp(6f).toFloat()
+        for (z in draft.topZ downTo 0) {
+            if (!draft.isVisible(z)) continue
+            val bounds = store.layerBounds(draft, z, bitmap.width, bitmap.height) ?: continue
+            if (x >= bounds.left - padding && x <= bounds.right + padding &&
+                y >= bounds.top - padding && y <= bounds.bottom + padding) return z
+        }
+        var best = -1
+        var bestDistance = dp(40f).toFloat()
+        draft.labels.forEachIndexed { index, label ->
+            if (!label.visible) return@forEachIndexed
+            val dx = label.x * bitmap.width - x
+            val dy = label.y * bitmap.height - y
+            val distance = sqrt(dx * dx + dy * dy)
+            if (distance <= bestDistance) {
+                bestDistance = distance
+                best = draft.zForLabel(index)
+            }
+        }
+        return best
+    }
+
     private fun moveDrag(x: Float, y: Float) {
-        val index = draggingLabel
-        if (index !in draft.labels.indices) return
+        val z = draggingZ
+        if (z !in 0 until draft.layerCount) return
         val bitmap = previewBitmap ?: return
         val rect = imageRect(bitmap) ?: return
         if (!draggingMoved) {
@@ -861,7 +1242,16 @@ class FrameEditorActivity : AppCompatActivity() {
         }
         val nx = ((x - rect.left) / rect.width()).coerceIn(0f, 1f)
         val ny = ((y - rect.top) / rect.height()).coerceIn(0f, 1f)
-        updateSelectedLabelAt(index) { it.copy(x = nx, y = ny) }
+        draft = if (draft.isImageLayer(z)) {
+            draft.copy(imageLayer = draft.imageLayer.copy(x = nx, y = ny))
+        } else {
+            draft.labelIndexAt(z)?.let { index ->
+                draft.copy(labels = draft.labels.toMutableList().apply {
+                    set(index, get(index).copy(x = nx, y = ny))
+                })
+            } ?: draft
+        }
+        requestPreview()
         withoutFieldEvents {
             val xPercent = (nx * 100).roundToInt()
             binding.xSeek.progress = xPercent
@@ -870,6 +1260,7 @@ class FrameEditorActivity : AppCompatActivity() {
             binding.ySeek.progress = yPercent
             binding.yValue.text = getString(R.string.frame_editor_percent, yPercent)
         }
+        updateSelectionBox()
     }
 
     /** Bitmap display rect inside the fit-center preview ImageView. */
@@ -933,12 +1324,32 @@ class FrameEditorActivity : AppCompatActivity() {
                 putFloat(KEY_SIZE, label.size)
                 putInt(KEY_COLOR, label.color)
                 putString(KEY_FONT, label.font)
+                putBoolean(KEY_VISIBLE, label.visible)
             })
         }
         return Bundle().apply {
             putString(KEY_OVERLAY, design.overlay)
             putString(KEY_CANVAS, design.canvas.name)
             putParcelableArrayList(KEY_LABELS, labels)
+            putBundle(KEY_IMAGE_LAYER, Bundle().apply {
+                putFloat(KEY_X, design.imageLayer.x)
+                putFloat(KEY_Y, design.imageLayer.y)
+                putFloat(KEY_SCALE, design.imageLayer.scale)
+                putBoolean(KEY_VISIBLE, design.imageLayer.visible)
+            })
+            putInt(KEY_OVERLAY_Z, design.overlayZ)
+            putBundle(KEY_CUSTOM_SIZE, Bundle().apply {
+                putInt(KEY_WIDTH, design.customSize.width)
+                putInt(KEY_HEIGHT, design.customSize.height)
+            })
+            design.printSize?.let { size ->
+                putBundle(KEY_PRINT_SIZE, Bundle().apply {
+                    putDouble(KEY_WIDTH, size.width)
+                    putDouble(KEY_HEIGHT, size.height)
+                    putString(KEY_UNIT, size.unit.name)
+                    putInt(KEY_DPI, size.dpi)
+                })
+            }
         }
     }
 
@@ -951,15 +1362,33 @@ class FrameEditorActivity : AppCompatActivity() {
                     y = label.getFloat(KEY_Y, 0.5f),
                     size = label.getFloat(KEY_SIZE, 0.06f),
                     color = label.getInt(KEY_COLOR, -1),
-                    font = label.getString(KEY_FONT)
+                    font = label.getString(KEY_FONT),
+                    visible = label.getBoolean(KEY_VISIBLE, true)
                 )
             }.orEmpty()
+        val imageLayer = bundle.getBundle(KEY_IMAGE_LAYER)
+        val customSize = bundle.getBundle(KEY_CUSTOM_SIZE)
         return FrameDesign(
             overlay = bundle.getString(KEY_OVERLAY),
             labels = labels,
             canvas = FrameCanvas.entries.firstOrNull { it.name == bundle.getString(KEY_CANVAS) }
-                ?: FrameCanvas.MATCH_PNG
-        )
+                ?: FrameCanvas.MATCH_PNG,
+            imageLayer = if (imageLayer == null) FramePlacement() else FramePlacement(
+                x = imageLayer.getFloat(KEY_X, 0.5f),
+                y = imageLayer.getFloat(KEY_Y, 0.5f),
+                scale = imageLayer.getFloat(KEY_SCALE, 1f),
+                visible = imageLayer.getBoolean(KEY_VISIBLE, true)
+            ),
+            overlayZ = bundle.getInt(KEY_OVERLAY_Z, 0),
+            customSize = if (customSize == null) FrameSize(1800, 2400) else FrameSize(
+                customSize.getInt(KEY_WIDTH, 1800),
+                customSize.getInt(KEY_HEIGHT, 2400)
+            ),
+            printSize = bundle.getBundle(KEY_PRINT_SIZE)?.let { print ->
+                val unit = FrameUnit.entries.firstOrNull { it.name == print.getString(KEY_UNIT) }
+                unit?.let { FramePrintSize(print.getDouble(KEY_WIDTH), print.getDouble(KEY_HEIGHT), it, print.getInt(KEY_DPI)) }
+            }
+        ).withClampedOrder()
     }
 
     private enum class LabelColor(val labelRes: Int, val argb: Int) {
@@ -974,8 +1403,13 @@ class FrameEditorActivity : AppCompatActivity() {
         private const val EXTRA_DIRECTORY = "com.ruangfoto.app.extra.FRAME_EDITOR_DIRECTORY"
         private const val MIN_SIZE_PERCENT = 2
         private const val MAX_SIZE_PERCENT = 25
+        private const val MIN_IMAGE_PERCENT = 10
+        private const val MAX_IMAGE_PERCENT = 400
+        private const val MAX_RATIO = 999
+        private const val MIN_CUSTOM_SIDE = 64
         private const val MAX_LABELS = 24
         private const val MAX_UNDO = 50
+        private const val MAX_LAYER_NAME_CHARS = 28
 
         private const val STATE_DRAFT = "frame_editor_draft"
         private const val STATE_SAVED = "frame_editor_saved"
@@ -992,6 +1426,16 @@ class FrameEditorActivity : AppCompatActivity() {
         private const val KEY_SIZE = "size"
         private const val KEY_COLOR = "color"
         private const val KEY_FONT = "font"
+        private const val KEY_VISIBLE = "visible"
+        private const val KEY_SCALE = "scale"
+        private const val KEY_IMAGE_LAYER = "imageLayer"
+        private const val KEY_OVERLAY_Z = "overlayZ"
+        private const val KEY_CUSTOM_SIZE = "customSize"
+        private const val KEY_WIDTH = "width"
+        private const val KEY_HEIGHT = "height"
+        private const val KEY_PRINT_SIZE = "printSize"
+        private const val KEY_UNIT = "unit"
+        private const val KEY_DPI = "dpi"
 
         internal fun intent(context: Context, directory: File): Intent =
             Intent(context, FrameEditorActivity::class.java)
