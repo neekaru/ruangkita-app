@@ -39,6 +39,7 @@ class UploadStoreTest {
             val recovered = store.next()!!
             assertEquals(original.id, recovered.id)
             assertEquals(original.name, recovered.name)
+            assertEquals(directory.name, recovered.sessionFolder)
             assertTrue(recovered.finalizing)
             assertEquals("secret", store.settings()!!.password)
             try { store.saveSettings(settings.copy(host = "second.example")); fail("Queued upload silently redirected") }

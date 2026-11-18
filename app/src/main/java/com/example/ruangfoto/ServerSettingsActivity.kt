@@ -65,12 +65,12 @@ class ServerSettingsActivity : AppCompatActivity() {
             binding.portInput.setText(value.port.toString())
             binding.userInput.setText(value.user)
             binding.passwordInput.setText(value.password)
-            binding.folderInput.setText(value.folder)
+            binding.folderInput.setText(if (value.folder == "." &&
+                (value.protocol == TransferProtocol.FTP || value.protocol == TransferProtocol.FTPS)) "" else value.folder)
             binding.hostFingerprintInput.setText(value.hostKeyFingerprint)
         } else {
             binding.protocolSpinner.setSelection(TransferProtocol.FTPS.ordinal)
             binding.portInput.setText(TransferProtocol.FTPS.port.toString())
-            binding.folderInput.setText("/")
         }
         val timing = value?.timing ?: TransferTiming()
         binding.connectTimeoutInput.setText(timing.connectTimeoutSeconds.toString())
@@ -86,6 +86,8 @@ class ServerSettingsActivity : AppCompatActivity() {
         val ssh = protocol == TransferProtocol.SFTP || protocol == TransferProtocol.SCP
         binding.hostFingerprintLayout.visibility = if (ssh) View.VISIBLE else View.GONE
         binding.trustHostButton.visibility = if (ssh) View.VISIBLE else View.GONE
+        binding.folderLayout.setHint(if (ssh) R.string.transfer_folder else R.string.transfer_ftp_base_folder)
+        binding.folderLayout.helperText = if (ssh) null else getString(R.string.transfer_ftp_folder_hint)
         binding.protocolNote.text = when (protocol) {
             TransferProtocol.FTP -> "FTP is unencrypted; credentials and photos can be read on the network."
             TransferProtocol.FTPS -> "FTPS encrypts the connection and verifies the server certificate."
@@ -96,12 +98,14 @@ class ServerSettingsActivity : AppCompatActivity() {
 
     private fun values(allowUnpinnedHost: Boolean = false): TransferSettings {
         val protocol = TransferProtocol.values()[binding.protocolSpinner.selectedItemPosition]
+        val folder = binding.folderInput.text.toString().trim()
+        val defaultFolder = if (protocol == TransferProtocol.FTP || protocol == TransferProtocol.FTPS) "." else "/"
         return TransferSettings(
             binding.hostInput.text.toString().trim(),
             binding.portInput.text.toString().toIntOrNull() ?: 0,
             binding.userInput.text.toString().trim(),
             binding.passwordInput.text.toString(),
-            binding.folderInput.text.toString().trim(),
+            folder.ifBlank { defaultFolder },
             protocol,
             binding.hostFingerprintInput.text.toString().trim(),
             TransferTiming(

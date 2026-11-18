@@ -63,6 +63,8 @@
     <string name="transfer_user">Username</string>
     <string name="transfer_password">Password</string>
     <string name="transfer_folder">Destination folder</string>
+    <string name="transfer_ftp_base_folder">Base folder (optional)</string>
+    <string name="transfer_ftp_folder_hint">Leave blank to use the login folder. Each session gets its own subfolder.</string>
     <string name="transfer_browse">Browse folders</string>
     <string name="transfer_fingerprint">SSH host fingerprint</string>
     <string name="transfer_verify_host">Verify SSH host</string>
