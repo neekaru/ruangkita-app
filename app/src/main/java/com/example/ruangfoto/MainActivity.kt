@@ -167,6 +167,14 @@ class MainActivity : AppCompatActivity() {
                             }
                         )
 
+                        activeUsbDeviceName = null
+                        activeCameraName = null
+
+                        runOnUiThread {
+                            binding.stopButton.isEnabled = false
+                            binding.stopButton.text = "Start Receiving"
+                        }
+
                         requestSessionStop()
                     }
                 }
@@ -480,14 +488,62 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupButtons() {
 
+        binding.stopButton.text = "Start Receiving"
+
         binding.stopButton.setOnClickListener {
-            requestSessionStop()
+
+            if (nativeRunning.get()) {
+                requestSessionStop()
+            } else {
+                restartCameraReceiver()
+            }
         }
+
         binding.transfersButton.setOnClickListener {
             startActivity(UploadActivity.intent(this, activeSessionDir))
         }
 
         binding.stopButton.isEnabled = false
+    }
+
+    // Restart receiver using the still-connected USB camera.
+    // The previous native session closes its UsbDeviceConnection,
+    // so a fresh connection and file descriptor are required.
+    private fun restartCameraReceiver() {
+
+        if (nativeRunning.get()) {
+            return
+        }
+
+        if (activeSessionDir == null) {
+            updateStatus("Create a session first")
+            binding.stopButton.isEnabled = false
+            return
+        }
+
+        val deviceName = activeUsbDeviceName
+
+        val device = usbManager.deviceList.values.firstOrNull {
+            it.deviceName == deviceName && isPtpInterface(it)
+        }
+
+        if (device == null) {
+            activeUsbDeviceName = null
+            activeCameraName = null
+
+            binding.stopButton.text = "Start Receiving"
+            binding.stopButton.isEnabled = false
+            updateStatus("Camera disconnected - waiting for camera")
+            return
+        }
+
+        if (!usbManager.hasPermission(device)) {
+            binding.stopButton.isEnabled = false
+            requestCameraPermission(device)
+            return
+        }
+
+        openCameraDevice(device)
     }
 
     private fun updateDashboard() {
@@ -1003,7 +1059,6 @@ class MainActivity : AppCompatActivity() {
 
             connection.close()
             usbConnection = null
-            activeUsbDeviceName = null
 
             return
         }
@@ -1011,6 +1066,7 @@ class MainActivity : AppCompatActivity() {
         stopRequested.set(false)
         resetStop()
 
+        binding.stopButton.text = "Stop Receiving"
         binding.stopButton.isEnabled = false
         binding.statusText.text = "Starting camera receiver..."
 
@@ -1098,6 +1154,17 @@ class MainActivity : AppCompatActivity() {
                 UploadService.watching = false
                 stopRequested.set(false)
 
+            }
+
+            val connectedDevice = activeUsbDeviceName?.let { savedDeviceName ->
+                usbManager.deviceList.values.firstOrNull {
+                    it.deviceName == savedDeviceName &&
+                            isPtpInterface(it) &&
+                            usbManager.hasPermission(it)
+                }
+            }
+
+            if (connectedDevice == null) {
                 activeUsbDeviceName = null
                 activeCameraName = null
             }
@@ -1106,13 +1173,16 @@ class MainActivity : AppCompatActivity() {
 
                 if (!activityDestroyed) {
 
-                    binding.stopButton.isEnabled = false
+                    binding.stopButton.text = "Start Receiving"
+                    binding.stopButton.isEnabled = connectedDevice != null
 
                     binding.statusText.text =
-                        if (errorMessage == null) {
-                            "Session stopped"
-                        } else {
+                        if (errorMessage != null) {
                             "Session ended with error: $errorMessage"
+                        } else if (connectedDevice != null) {
+                            "Connected - Receiver stopped"
+                        } else {
+                            "Session stopped - waiting for camera"
                         }
 
                     updateSessionStats()
