@@ -28,6 +28,11 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.RuangFoto.Transfers" />
+        <activity
+            android:name=".FrameEditorActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.RuangFoto.Transfers" />
         <service
             android:name=".UploadService"
             android:exported="false"
