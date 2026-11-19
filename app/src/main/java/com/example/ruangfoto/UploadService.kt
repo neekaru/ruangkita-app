@@ -67,7 +67,7 @@ class UploadService : Service() {
             idleSince = 0L
             val settings = store.settings() ?: throw TransferFailure("Configure a transfer server before uploading", true)
             if (settings.destination() != job.destination) return
-            val current = transferClient(settings)
+            val current = transferClient(settings, job.sessionFolder)
             transfer = current
             active = current
             try {

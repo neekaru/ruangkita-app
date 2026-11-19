@@ -72,15 +72,15 @@ internal interface TransferClient {
                remoteName: String, wasFinalizing: Boolean, beforeRename: () -> Unit, progress: (Long) -> Unit)
 }
 
-internal fun transferClient(settings: TransferSettings): TransferClient = when (settings.protocol) {
-    TransferProtocol.FTP, TransferProtocol.FTPS -> FtpTransfer()
+internal fun transferClient(settings: TransferSettings, sessionFolder: String? = null): TransferClient = when (settings.protocol) {
+    TransferProtocol.FTP, TransferProtocol.FTPS -> FtpTransfer(sessionFolder)
     TransferProtocol.SFTP, TransferProtocol.SCP -> SshTransfer()
 }
 
 internal class TransferFailure(message: String, val permanent: Boolean = false, val configuration: Boolean = false) : IOException(message)
 
 /** One client per transfer. Cancellation closes sockets, including a blocked data transfer. */
-internal class FtpTransfer : TransferClient {
+internal class FtpTransfer(private val sessionFolder: String? = null) : TransferClient {
     @Volatile private var client: FTPClient? = null
     @Volatile private var cancelled = false
 
@@ -112,8 +112,19 @@ internal class FtpTransfer : TransferClient {
         if (ftp is FTPSClient) { ftp.execPBSZ(0); ftp.execPROT("P") }
         ftp.enterLocalPassiveMode()
         if (!ftp.setFileType(FTP.BINARY_FILE_TYPE)) fail(ftp, "Server rejected binary transfer")
-        if (!ftp.changeWorkingDirectory(settings.folder)) throw TransferFailure("Remote folder unavailable; check path and permissions", true, true)
+        if (settings.folder != "." && !ftp.changeWorkingDirectory(settings.folder)) {
+            throw TransferFailure("Remote folder unavailable; check path and permissions", true, true)
+        }
         return ftp
+    }
+
+    private fun enterSessionFolder(ftp: FTPClient, folder: String) {
+        val error = "Cannot open or create the FTP session folder; check permissions"
+        if (ftp.changeWorkingDirectory(folder)) return
+        if (ftp.replyCode !in 500..599) fail(ftp, error)
+        if (!ftp.makeDirectory(folder) && ftp.replyCode !in 500..599) fail(ftp, error)
+        // Another upload may have created the directory after our first CWD.
+        if (!ftp.changeWorkingDirectory(folder)) fail(ftp, error)
     }
 
     override fun listDirectories(settings: TransferSettings, folder: String): List<String> {
@@ -140,11 +151,16 @@ internal class FtpTransfer : TransferClient {
                remoteName: String, wasFinalizing: Boolean, beforeRename: () -> Unit,
                progress: (Long) -> Unit) {
         require(remoteName.matches(Regex("[A-Za-z0-9._-]+"))) { "Invalid remote filename" }
+        if (sessionFolder != null && (sessionFolder.isBlank() || sessionFolder == "." || sessionFolder == ".." ||
+                sessionFolder.any { it == '/' || it == '\\' || it.isISOControl() })) {
+            throw TransferFailure("Session name cannot be used as an FTP folder", true)
+        }
         if (!file.isFile || file.length() != expectedSize || file.lastModified() != expectedModified) {
             throw TransferFailure("Local photo changed or disappeared; original upload was not sent", true)
         }
         try {
             val ftp = connect(settings)
+            if (sessionFolder != null) enterSessionFolder(ftp, sessionFolder)
             // The UUID name belongs to this durable job. Only a recorded rename attempt may recover it.
             val existing = ftp.mlistFile(remoteName) ?: ftp.listFiles(remoteName).firstOrNull { it.name == remoteName }
             if (existing != null) {
